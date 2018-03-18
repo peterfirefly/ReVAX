@@ -1,0 +1,550 @@
+Snipped from cvaxspec.txt.
+
+Fixed a typo where AC was written as XORB2 instead of the correct XORW2.
+Fixed a typo where 88 was written as BICB2 instead of the correct BISB2.
+
+They are corrected in the NVAX CPU Chip Functional Specification, Revision 1.0, February 1991.
+(And probably earlier than that.)
+
+
+
+------------------
+
+
+        2.4.1  Integer Arithmetic And Logical Instructions -
+
+
+        Opcode   Instruction                                                    N Z V C         Exceptions
+        ------   -----------                                                    -------         ----------
+
+        58       ADAWI add.rw, sum.mw                                           * * * *         iov
+
+        80       ADDB2 add.rb, sum.mb                                           * * * *         iov
+        C0       ADDL2 add.rl, sum.ml                                           * * * *         iov
+        A0       ADDW2 add.rw, sum.mw                                           * * * *         iov
+
+        81       ADDB3 add1.rb, add2.rb, sum.wb                                 * * * *         iov
+        C1       ADDL3 add1.rl, add2.rl, sum.wl                                 * * * *         iov
+        A1       ADDW3 add1.rw, add2.rw, sum.ww                                 * * * *         iov
+
+        D8       ADWC add.rl, sum.ml                                            * * * *         iov
+
+        78       ASHL cnt.rb, src.rl, dst.wl                                    * * * 0         iov
+        79       ASHQ cnt.rb, src.rq, dst.wq                                    * * * 0         iov
+
+        8A       BICB2 mask.rb, dst.mb                                          * * 0 -
+        CA       BICL2 mask.rl, dst.ml                                          * * 0 -
+        AA       BICW2 mask.rw, dst.mw                                          * * 0 -
+
+        8B       BICB3 mask.rb, src.rb, dst.wb                                  * * 0 -
+        CB       BICL3 mask.rl, src.rl, dst.wl                                  * * 0 -
+        AB       BICW3 mask.rw, src.rw, dst.ww                                  * * 0 -
+
+        88       BISB2 mask.rb, dst.mb                                          * * 0 -
+        C8       BISL2 mask.rl, dst.ml                                          * * 0 -
+        A8       BISW2 mask.rw, dst.mw                                          * * 0 -
+
+        89       BISB3 mask.rb, src.rb, dst.wb                                  * * 0 -
+        C9       BISL3 mask.rl, src.rl, dst.wl                                  * * 0 -
+        A9       BISW3 mask.rw, src.rw, dst.ww                                  * * 0 -
+
+        93       BITB mask.rb, src.rb                                           * * 0 -
+        D3       BITL mask.rl, src.rl                                           * * 0 -
+        B3       BITW mask.rw, src.rw                                           * * 0 -
+
+        94       CLRB dst.wb                                                    0 1 0 -
+        D4       CLRL{=F} dst.wl                                                0 1 0 -
+        7C       CLRQ{=D=G} dst.wq                                              0 1 0 -
+        B4       CLRW dst.ww                                                    0 1 0 -
+
+        91       CMPB src1.rb, src2.rb                                          * * 0 *
+        D1       CMPL src1.rl, src2.rl                                          * * 0 *
+        B1       CMPW src1.rw, src2.rw                                          * * 0 *
+
+        98       CVTBL src.rb, dst.wl                                           * * 0 0
+        99       CVTBW src.rb, dst.wl                                           * * 0 0
+
+CMOS-2 CVAX CPU ENGINEERING SPECIFICATION (Company Confidential)         Page 19
+ARCHITECTURE SUMMARY
+
+
+        F6       CVTLB src.rl, dst.wb                                           * * * 0         iov
+        F7       CVTLW src.rl, dst.ww                                           * * * 0         iov
+        33       CVTWB src.rw, dst.wb                                           * * * 0         iov
+        32       CVTWL src.rw, dst.wl                                           * * 0 0
+
+        97       DECB dif.mb                                                    * * * *         iov
+        D7       DECL dif.ml                                                    * * * *         iov
+        B7       DECW dif.mw                                                    * * * *         iov
+
+        86       DIVB2 divr.rb, quo.mb                                          * * * 0         iov, idvz
+        C6       DIVL2 divr.rl, quo.ml                                          * * * 0         iov, idvz
+        A6       DIVW2 divr.rw, quo.mw                                          * * * 0         iov, idvz
+
+        87       DIVB3 divr.rb, divd.rb, quo.wb                                 * * * 0         iov, idvz
+        C7       DIVL3 divr.rl, divd.rl, quo.wl                                 * * * 0         iov, idvz
+        A7       DIVW3 divr.rw, divd.rw, quo.ww                                 * * * 0         iov, idvz
+
+        7B       EDIV divr.rl, divd.rq, quo.wl, rem.wl                          * * * 0         iov, idvz
+
+        7A       EMUL mulr.rl, muld.rl, add.rl, prod.wq                         * * 0 0
+
+        96       INCB sum.mb                                                    * * * *         iov
+        D6       INCL sum.ml                                                    * * * *         iov
+        B6       INCW sum.mw                                                    * * * *         iov
+
+        92       MCOMB src.rb, dst.wb                                           * * 0 -
+        D2       MCOML src.rl, dst.wl                                           * * 0 -
+        B2       MCOMW src.rw, dst.ww                                           * * 0 -
+
+        8E       MNEGB src.rb, dst.wb                                           * * * *         iov
+        CE       MNEGL src.rl, dst.wl                                           * * * *         iov
+        AE       MNEGW src.rw, dst.ww                                           * * * *         iov
+
+        90       MOVB src.rb, dst.wb                                            * * 0 -
+        D0       MOVL src.rl, dst.wl                                            * * 0 -
+        7D       MOVQ src.rq, dst.wq                                            * * 0 -
+        B0       MOVW src.rw, dst.ww                                            * * 0 -
+
+        9A       MOVZBW src.rb, dst.wb                                          0 * 0 -
+        9B       MOVZBL src.rb, dst.wl                                          0 * 0 -
+        3C       MOVZWL src.rw, dst.ww                                          0 * 0 -
+
+        84       MULB2 mulr.rb, prod.mb                                         * * * 0         iov
+        C4       MULL2 mulr.rl, prod.ml                                         * * * 0         iov
+        A4       MULW2 mulr.rw, prod.mw                                         * * * 0         iov
+
+        85       MULB3 mulr.rb, muld.rb, prod.wb                                * * * 0         iov
+        C5       MULL3 mulr.rl, muld.rl, prod.wl                                * * * 0         iov
+        A5       MULW3 mulr.rw, muld.rw, prod.ww                                * * * 0         iov
+
+        DD       PUSHL src.rl, {-(SP).wl}                                       * * 0 -
+
+        9C       ROTL cnt.rb, src.rl, dst.wl                                    * * 0 -
+
+        D9       SBWC sub.rl, dif.ml                                            * * * *         iov
+
+
+CMOS-2 CVAX CPU ENGINEERING SPECIFICATION (Company Confidential)         Page 20
+ARCHITECTURE SUMMARY
+
+
+        82       SUBB2 sub.rb, dif.mb                                           * * * *         iov
+        C2       SUBL2 sub.rl, dif.ml                                           * * * *         iov
+        A2       SUBW2 sub.rw, dif.mw                                           * * * *         iov
+
+        83       SUBB3 sub.rb, min.rb, dif.wb                                   * * * *         iov
+        C3       SUBL3 sub.rl, min.rl, dif.wl                                   * * * *         iov
+        A3       SUBW3 sub.rw, min.rw, dif.ww                                   * * * *         iov
+
+        95       TSTB src.rb                                                    * * 0 0
+        D5       TSTL src.rl                                                    * * 0 0
+        B5       TSTW src.rw                                                    * * 0 0
+
+        8C       XORB2 mask.rb, dst.mb                                          * * 0 -
+        CC       XORL2 mask.rl, dst.ml                                          * * 0 -
+        AC       XORW2 mask.rw, dst.mw                                          * * 0 -
+
+        8D       XORB3 mask.rb, src.rb, dst.wb                                  * * 0 -
+        CD       XORL3 mask.rl, src.rl, dst.wl                                  * * 0 -
+        AD       XORW3 mask.rw, src.rw, dst.ww                                  * * 0 -
+
+
+
+        2.4.2  Address Instructions -
+
+
+        Opcode   Instruction                                                    N Z V C         Exceptions
+        ------   -----------                                                    -------         ----------
+
+        9E       MOVAB src.ab, dst.wl                                           * * 0 -
+        DE       MOVAL{=F} src.al, dst.wl                                       * * 0 -
+        7E       MOVAQ{=D=G} src.aq, dst.wl                                     * * 0 -
+        3E       MOVAW src.aw, dst.wl                                           * * 0 -
+
+        9F       PUSHAB src.ab, {-(SP).wl}                                      * * 0 -
+        DF       PUSHAL{=F} src.al, {-(SP).wl}                                  * * 0 -
+        7F       PUSHAQ{=D=G} src.aq, {-(SP).wl}                                * * 0 -
+        3F       PUSHAW src.aw, {-(SP).wl}                                      * * 0 -
+
+
+
+        2.4.3  Variable Length Bit Field Instructions -
+
+
+        Opcode   Instruction                                                    N Z V C         Exceptions
+        ------   -----------                                                    -------         ----------
+
+        EC       CMPV pos.rl, size.rb, base.vb, {field.rv}, src.rl              * * 0 *         rsv
+
+        ED       CMPZV pos.rl, size.rb, base.vb, {field.rv}, src.rl             * * 0 *         rsv
+
+        EE       EXTV pos.rl, size.rb, base.vb, {field.rv}, dst.wl              * * 0 -         rsv
+
+        EF       EXTZV pos.rl, size.rb, base.vb, {field.rv}, dst.wl             * * 0 -         rsv
+
+        F0       INSV src.rl, pos.rl, size.rb, base.vb, {field.wv}              - - - -         rsv
+
+
+CMOS-2 CVAX CPU ENGINEERING SPECIFICATION (Company Confidential)         Page 21
+ARCHITECTURE SUMMARY
+
+
+        EB       FFC startpos.rl, size.rb, base.vb, {field.rv}, findpos.wl      0 * 0 0         rsv
+        EA       FFS startpos.rl, size.rb, base.vb, {field.rv}, findpos.wl      0 * 0 0         rsv
+
+
+
+        2.4.4  Control Instructions -
+
+
+        Opcode   Instruction                                                    N Z V C         Exceptions
+        ------   -----------                                                    -------         ----------
+
+        9D       ACBB limit.rb, add.rb, index.mb, displ.bw                      * * * -         iov
+        F1       ACBL limit.rl, add.rl, index.ml, displ.bw                      * * * -         iov
+        3D       ACBW limit.rw, add.rw, index.mw, displ.bw                      * * * -         iov
+
+        F3       AOBLEQ limit.rl, index.ml, displ.bb                            * * * -         iov
+
+        F2       AOBLSS limit.rl, index.ml, displ.bb                            * * * -         iov
+
+        1E       BCC{=BGEQU} displ.bb                                           - - - -
+        1F       BCS{=BLSSU} displ.bb                                           - - - -
+        13       BEQL{=BEQLU} displ.bb                                          - - - -
+        18       BGEQ displ.bb                                                  - - - -
+        14       BGTR displ.bb                                                  - - - -
+        1A       BGTRU displ.bb                                                 - - - -
+        15       BLEQ displ.bb                                                  - - - -
+        1B       BLEQU displ.bb                                                 - - - -
+        19       BLSS displ.bb                                                  - - - -
+        12       BNEQ{=BNEQU} displ.bb                                          - - - -
+        1C       BVC displ.bb                                                   - - - -
+        1D       BVS displ.bb                                                   - - - -
+
+        E1       BBC pos.rl, base.vb, displ.bb, {field.rv}                      - - - -         rsv
+        E0       BBS pos.rl, base.vb, displ.bb, {field.rv}                      - - - -         rsv
+
+        E5       BBCC pos.rl, base.vb, displ.bb, {field.mv}                     - - - -         rsv
+        E3       BBCS pos.rl, base.vb, displ.bb, {field.mv}                     - - - -         rsv
+        E4       BBSC pos.rl, base.vb, displ.bb, {field.mv}                     - - - -         rsv
+        E2       BBSS pos.rl, base.vb, displ.bb, {field.mv}                     - - - -         rsv
+
+        E7       BBCCI pos.rl, base.vb, displ.bb, {field.mv}                    - - - -         rsv
+        E6       BBSSI pos.rl, base.vb, displ.bb, {field.mv}                    - - - -         rsv
+
+        E9       BLBC src.rl, displ.bb                                          - - - -
+        E8       BLBS src.rl, displ.bb                                          - - - -
+
+        11       BRB displ.bb                                                   - - - -
+        31       BRW displ.bw                                                   - - - -
+
+        10       BSBB displ.bb, {-(SP).wl}                                      - - - -
+        30       BSBW displ.bw, {-(SP).wl}                                      - - - -
+
+        8F       CASEB selector.rb, base.rb, limit.rb, displ.bw-list            * * 0 *
+        CF       CASEL selector.rl, base.rl, limit.rl, displ.bw-list            * * 0 *
+        AF       CASEW selector.rw, base.rw, limit.rw, displ.bw-list            * * 0 *
+
+
+CMOS-2 CVAX CPU ENGINEERING SPECIFICATION (Company Confidential)         Page 22
+ARCHITECTURE SUMMARY
+
+
+        17       JMP dst.ab                                                     - - - -
+
+        16       JSB dst.ab, {-(SP).wl}                                         - - - -
+
+        05       RSB {(SP)+.rl}                                                 - - - -
+
+        F4       SOBGEQ index.ml, displ.bb                                      * * * -         iov
+
+        F5       SOBGTR index.ml, displ.bb                                      * * * -         iov
+
+
+
+        2.4.5  Procedure Call Instructions -
+
+
+        Opcode   Instruction                                                    N Z V C         Exceptions
+        ------   -----------                                                    -------         ----------
+
+        FA       CALLG arglist.ab, dst.ab, {-(SP).w*}                           0 0 0 0         rsv
+
+        FB       CALLS numarg.rl, dst.ab, {-(SP).w*}                            0 0 0 0         rsv
+
+        04       RET {(SP)+.r*}                                                 * * * *         rsv
+
+
+
+        2.4.6  Miscellaneous Instructions -
+
+
+        Opcode   Instruction                                                    N Z V C         Exceptions
+        ------   -----------                                                    -------         ----------
+
+        B9       BICPSW mask.rw                                                 * * * *         rsv
+
+        B8       BISPSW mask.rw                                                 * * * *         rsv
+
+        03       BPT {-(KSP).w*}                                                0 0 0 0
+
+        00       HALT {-(KSP).w*}                                               - - - -         prv
+
+        0A       INDEX subscript.rl, low.rl, high.rl, size.rl, indexin.rl,      * * 0 0         sub
+                 indexout.wl
+
+        DC       MOVPSL dst.wl                                                  - - - -
+
+        01       NOP                                                            - - - -
+
+        BA       POPR mask.rw, {(SP)+.r*}                                       - - - -
+
+        BB       PUSHR mask.rw, {-(SP).w*}                                      - - - -
+
+        FC       XFC {unspecified operands}                                     0 0 0 0
+
+CMOS-2 CVAX CPU ENGINEERING SPECIFICATION (Company Confidential)         Page 23
+ARCHITECTURE SUMMARY
+
+
+        2.4.7  Queue Instructions -
+
+
+        Opcode   Instruction                                                    N Z V C         Exceptions
+        ------   -----------                                                    -------         ----------
+
+        5C       INSQHI entry.ab, header.aq                                     0 * 0 *         rsv
+
+        5D       INSQTI entry.ab, header.aq                                     0 * 0 *         rsv
+
+        0E       INSQUE entry.ab, pred.ab                                       * * 0 *
+
+        5E       REMQHI header.aq, addr.wl                                      0 * * *         rsv
+
+        5F       REMQTI header.aq, addr.wl                                      0 * * *         rsv
+
+        0F       REMQUE entry.ab, addr.wl                                       * * * *
+
+
+
+        2.4.8  Character String Instructions -
+
+
+        Opcode   Instruction                                                    N Z V C         Exceptions
+        ------   -----------                                                    -------         ----------
+
+        29       CMPC3 len.rw, src1addr.ab, src2addr.ab                         * * 0 *
+
+        2D       CMPC5 src1len.rw, src1addr.ab, fill.rb,                        * * 0 *
+                       src2len.rw, src2addr.ab
+
+        3A       LOCC char.rb, len.rw, addr.ab                                  0 * 0 0
+
+        28       MOVC3 len.rw, srcaddr.ab, dstaddr.ab, {R0-5.wl}                0 1 0 0
+
+        2C       MOVC5 srclen.rw, srcaddr.ab, fill.rb, dstlen.rw, dstaddr.ab,   * * 0 *
+                 {R0-5.wl}
+
+        2A       SCANC len.rw, addr.ab, tbladdr.ab, mask.rb                     0 * 0 0
+
+        3B       SKPC char.rb, len.rw, addr.ab                                  0 * 0 0
+
+        2B       SPANC len.rw, addr.ab, tbladdr.ab, mask.rb                     0 * 0 0
+
+
+
+
+        2.4.9  Operating System Support Instructions -
+
+
+        Opcode   Instruction                                                    N Z V C         Exceptions
+        ------   -----------                                                    -------         ----------
+
+        BD       CHME param.rw, {-(ySP).w*}                                     0 0 0 0
+        BC       CHMK param.rw, {-(ySP).w*}                                     0 0 0 0
+        BE       CHMS param.rw, {-(ySP).w*}                                     0 0 0 0
+
+CMOS-2 CVAX CPU ENGINEERING SPECIFICATION (Company Confidential)         Page 24
+ARCHITECTURE SUMMARY
+
+
+        BF       CHMU param.rw, {-(ySP).w*}                                     0 0 0 0
+                 Where y=MINU(x, PSL<current_mode>)
+
+        06       LDPCTX {PCB.r*, -(KSP).w*}                                     - - - -         rsv, prv
+
+        DB       MFPR procreg.rl, dst.wl                                        * * 0 -         rsv, prv
+
+        DA       MTPR src.rl, procreg.rl                                        * * 0 -         rsv, prv
+
+        0C       PROBER mode.rb, len.rw, base.ab                                0 * 0 - 
+        0D       PROBEW mode.rb, len.rw, base.ab                                0 * 0 - 
+
+        02       REI {(SP)+.r*}                                                 * * * *         rsv
+
+        07       SVPCTX {(SP)+.r*, PCB.w*}                                      - - - -         prv
+
+
+
+        2.4.10  Floating Point Instructions -
+
+        These instructions are implemented in hardware only if an external
+        floating point unit is present in the system.
+
+        Opcode   Instruction                                                    N Z V C         Exceptions
+        ------   -----------                                                    -------         ----------
+
+        6F       ACBD limit.rd, add.rd, index.md,displ.bw                       * * 0 -         rsv, fov, fuv
+        4F       ACBF limit.rf, add.rf, index.mf,displ.bw                       * * 0 -         rsv, fov, fuv
+        4FFD     ACBG limit.rg, add.rg, index.mg,displ.bw                       * * 0 -         rsv, fov, fuv
+
+        60       ADDD2 add.rd, sum.md                                           * * 0 0         rsv, fov, fuv
+        40       ADDF2 add.rf, sum.mf                                           * * 0 0         rsv, fov, fuv
+        40FD     ADDG2 add.rg, sum.mg                                           * * 0 0         rsv, fov, fuv
+
+        61       ADDD3 add1.rd, add2.rd, sum.wd                                 * * 0 0         rsv, fov, fuv
+        41       ADDF3 add1.rf, add2.rf, sum.wf                                 * * 0 0         rsv, fov, fuv
+        41FD     ADDG3 add1.rg, add2.rg, sum.wg                                 * * 0 0         rsv, fov, fuv
+
+        71       CMPD src1.rd, src2.rd                                          * * 0 0         rsv
+        51       CMPF src1.rf, src2.rf                                          * * 0 0         rsv
+        51FD     CMPG src1.rg, src2.rg                                          * * 0 0         rsv
+
+        6C       CVTBD src.rb, dst.wd                                           * * 0 0
+        4C       CVTBF src.rb, dst.wf                                           * * 0 0
+        4CFD     CVTBG src.rb, dst.wg                                           * * 0 0
+        68       CVTDB src.rd, dst.wb                                           * * * 0         rsv, iov
+        76       CVTDF src.rd, dst.wf                                           * * 0 0         rsv, fov
+        6A       CVTDL src.rd, dst.wl                                           * * * 0         rsv, iov
+        69       CVTDW src.rd, dst.ww                                           * * * 0         rsv, iov
+        48       CVTFB src.rf, dst.wb                                           * * * 0         rsv, iov
+        56       CVTFD src.rf, dst.wd                                           * * 0 0         rsv
+        99FD     CVTFG src.rf, dst.wg                                           * * 0 0         rsv
+        4A       CVTFL src.rf, dst.wl                                           * * * 0         rsv, iov
+        49       CVTFW src.rf, dst.ww                                           * * * 0         rsv, iov
+        48FD     CVTGB src.rg, dst.wb                                           * * * 0         rsv, iov
+        33FD     CVTGF src.rg, dst.wf                                           * * 0 0         rsv, fov, fuv
+
+CMOS-2 CVAX CPU ENGINEERING SPECIFICATION (Company Confidential)         Page 25
+ARCHITECTURE SUMMARY
+
+
+        4AFD     CVTGL src.rg, dst.wl                                           * * * 0         rsv, iov
+        49FD     CVTGW src.rg, dst.ww                                           * * * 0         rsv, iov
+        6E       CVTLD src.rl, dst.wd                                           * * 0 0
+        4E       CVTLF src.rl, dst.wf                                           * * 0 0
+        4EFD     CVTLG src.rl, dst.wg                                           * * 0 0
+        6D       CVTWD src.rw, dst.wd                                           * * 0 0
+        4D       CVTWF src.rw, dst.wf                                           * * 0 0
+        4DFD     CVTWG src.rw, dst.wg                                           * * 0 0
+
+        6B       CVTRDL src.rd, dst.wl                                          * * * 0         rsv, iov
+        4B       CVTRFL src.rf, dst.wl                                          * * * 0         rsv, iov
+        4BFD     CVTRGL src.rg, dst.wl                                          * * * 0         rsv, iov
+
+        66       DIVD2 divr.rd, quo.md                                          * * 0 0         rsv, fov, fuv, fdvz
+        46       DIVF2 divr.rf, quo.mf                                          * * 0 0         rsv, fov, fuv, fdvz
+        46FD     DIVG2 divr.rg, quo.mg                                          * * 0 0         rsv, fov, fuv, fdvz
+
+        67       DIVD3 divr.rd, divd.rd, quo.wd                                 * * 0 0         rsv, fov, fuv, fdvz
+        47       DIVF3 divr.rf, divd.rf, quo.wf                                 * * 0 0         rsv, fov, fuv, fdvz
+        47FD     DIVG3 divr.rg, divd.rg, quo.wg                                 * * 0 0         rsv, fov, fuv, fdvz
+
+        74       EMODD mulr.rd, mulrx.rb, muld.rd, int.wl, fract.wd             * * * 0         rsv, fov, fuv, iov
+        54       EMODF mulr.rf, mulrx.rb, muld.rf, int.wl, fract.wf             * * * 0         rsv, fov, fuv, iov
+        54FD     EMODG mulr.rg, mulrx.rw, muld.rg, int.wl, fract.wg             * * * 0         rsv, fov, fuv, iov
+
+        72       MNEGD src.rd, dst.wd                                           * * 0 0         rsv
+        52       MNEGF src.rf, dst.wf                                           * * 0 0         rsv
+        52FD     MNEGG src.rg, dst.wg                                           * * 0 0         rsv
+
+        70       MOVD src.rd, dst.wd                                            * * 0 -         rsv
+        50       MOVF src.rf, dst.wf                                            * * 0 -         rsv
+        50FD     MOVG src.rg, dst.wg                                            * * 0 -         rsv
+
+        64       MULD2 mulr.rd, prod.md                                         * * 0 0         rsv, fov, fuv
+        44       MULF2 mulr.rf, prod.mf                                         * * 0 0         rsv, fov, fuv
+        44FD     MULG2 mulr.rg, prod.mg                                         * * 0 0         rsv, fov, fuv
+
+        65       MULD3 mulr.rd, muld.rd, prod.wd                                * * 0 0         rsv, fov, fuv
+        45       MULF3 mulr.rf, muld.rf, prod.wf                                * * 0 0         rsv, fov, fuv
+        45FD     MULG3 mulr.rg, muld.rg, prod.wg                                * * 0 0         rsv, fov, fuv
+
+        75       POLYD arg.rd, degree.rw, table.ab                              * * 0 0         rsv, fov, fuv
+        55       POLYF arg.rf, degree.rw, table.ab                              * * 0 0         rsv, fov, fuv
+        55FD     POLYG arg.rf, degree.rw, table.ab                              * * 0 0         rsv, fov, fuv
+
+        62       SUBD2 sub.rd, dif.md                                           * * 0 0         rsv, fov, fuv
+        42       SUBF2 sub.rf, dif.mf                                           * * 0 0         rsv, fov, fuv
+        42FD     SUBG2 sub.rg, dif.mg                                           * * 0 0         rsv, fov, fuv
+
+        63       SUBD3 sub.rd, min.rd, dif.wd                                   * * 0 0         rsv, fov, fuv
+        43       SUBF3 sub.rf, min.rf, dif.wf                                   * * 0 0         rsv, fov, fuv
+        43FD     SUBG3 sub.rg, min.rg, dif.wg                                   * * 0 0         rsv, fov, fuv
+
+        73       TSTD src.rd                                                    * * 0 0         rsv
+        53       TSTF src.rf                                                    * * 0 0         rsv
+        53FD     TSTG src.rg                                                    * * 0 0         rsv
+
+CMOS-2 CVAX CPU ENGINEERING SPECIFICATION (Company Confidential)         Page 26
+ARCHITECTURE SUMMARY
+
+
+        2.4.11  Microcode-Assisted Emulated Instructions -
+
+        The  chip  provides  microcode  assistance  for  the   macrocode
+        emulation  of  these  instructions.   The  chip  processes  each
+        operand specifier, creates a standard argument list, and invokes
+        an emulation routine to perform emulation.
+
+        Opcode   Instruction                                                    N Z V C         Exceptions
+        ------   -----------                                                    -------         ----------
+        20       ADDP4 addlen.rw, addaddr.ab, sumlen.rw, sumaddr.ab             * * * 0         rsv, dov
+
+        21       ADDP6 add1len.rw, add1addr.ab, add2len.rw, add2addr.ab,        * * * 0         rsv, dov
+                       sumlen.rw, sumaddr.ab
+
+        F8       ASHP cnt.rb, srclen.rw, srcaddr.ab, round.rb,                  * * * 0         rsv, dov
+                      dstlen.rw, dstaddr.ab
+
+        35       CMPP3 len.rw, src1addr.ab, src2addr.ab                         * * 0 0
+
+        37       CMPP4 src1len.rw, src1addr.ab, src2len.rw, src2addr.ab         * * 0 0
+
+        0B       CRC tbl.ab, inicrc.rl, strlen.rw, stream.ab                    * * 0 0
+
+        F9       CVTLP src.rl, dstlen.rw, dstaddr.ab                            * * * 0         rsv, dov
+        36       CVTPL srclen.rw, srcaddr.ab, dst.wl                            * * * 0         rsv, iov
+
+        08       CVTPS srclen.rw, srcaddr.ab, dstlen.rw, dstaddr.ab             * * * 0         rsv, dov
+        09       CVTSP srclen.rw, srcaddr.ab, dstlen.rw, dstaddr.ab             * * * 0         rsv, dov
+
+        24       CVTPT srclen.rw, srcaddr.ab, tbladdr.ab,                       * * * 0         rsv, dov
+                       dstlen.rw, dstaddr.ab
+        26       CVTTP srclen.rw, srcaddr.ab, tbladdr.ab,                       * * * 0         rsv, dov
+                       dstlen.rw, dstaddr.ab
+
+        27       DIVP divrlen.rw, divraddr.ab, divdlen.rw, divdaddr.ab,         * * * 0         rsv, dov, ddvz
+                      quolen.rw, quoaddr.ab
+
+        38       EDITPC srclen.rw, srcaddr.ab, pattern.ab, dstaddr.ab           * * * *         rsv, dov
+
+        39       MATCHC objlen.rw, objaddr.ab, srclen.rw, srcaddr.ab            0 * 0 0
+
+        34       MOVP len.rw, srcaddr.ab, dstaddr.ab                            * * 0 0
+
+        2E       MOVTC srclen.rw, srcaddr.ab, fill.rb, tbladdr.ab,              * * 0 *
+                       dstlen.rw, dstaddr.ab
+
+        2F       MOVTUC srclen.rw, srcaddr.ab, esc.rb, tbladdr.ab,              * * * *
+                        dstlen.rw, dstaddr.ab
+
+        25       MULP mulrlen.rw, mulraddr.ab, muldlen.rw, muldaddr.ab,         * * * 0         rsv, dov
+                      prodlen.rw, prodaddr.ab
+
+        22       SUBP4 sublen.rw, subaddr.ab, diflen.rw, difaddr.ab             * * * 0         rsv, dov
+
+        23       SUBP6 sublen.rw, subaddr.ab, minlen.rw, minaddr.ab,            * * * 0         rsv, dov
+                       diflen.rw, difaddr.ab
+

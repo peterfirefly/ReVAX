@@ -1,0 +1,1074 @@
+# Copyright 2018  Peter Lund <firefly@vax64.dk>
+#
+# Licensed under GPL v2.
+#
+# ---
+#
+# VAX µcode
+#
+# see doc/implementation.txt for a description of the microcode format.
+#
+# src/uasm.pl assembles the microcode and outputs it in C table format.
+#
+# Overview of µops:
+#   3-addr, load/store, explicit widths, two flag sets.
+#
+#   op	src1, src2, dst		-- width flag-set
+#   imm	imm, dst		# always 32-bit
+#   ld	[reg], dst		-- width
+#   st	src1, [reg]		-- width
+#   bcc	µtarget			-- flag-set
+#   jmp	macro-target
+#
+# Numbers can be decimal (1234, 7, 13) or hexadecimal (0xCAFE).  Both types
+# of numbers can contain '_' for spacing purposes.
+
+-RESET:
+	imm	0, r0
+	mov	r0, r1		-- 32 µ
+	mov	r0, r2		-- 32 µ
+	mov	r0, r3		-- 32 µ
+	mov	r0, r4		-- 32 µ
+	mov	r0, r5		-- 32 µ
+	mov	r0, r6		-- 32 µ
+	mov	r0, r7		-- 32 µ
+	mov	r0, r8		-- 32 µ
+	mov	r0, r9		-- 32 µ
+	mov	r0, r10		-- 32 µ
+	mov	r0, r11		-- 32 µ
+	mov	r0, r12		-- 32 µ
+	mov	r0, r13		-- 32 µ
+	mov	r0, r14		-- 32 µ
+
+	imm	KSP, t0
+	mtpr	r0, t0
+	imm	SSP, t0
+	mtpr	r0, t0
+	imm	ESP, t0
+	mtpr	r0, t0
+	imm	USP, t0
+	mtpr	r0, t0
+	imm	ISP, t0
+	mtpr	r0, t0
+
+	imm	0x2004_0000, r15
+	imm	0xCAFE_BABE, psl
+#	imm	...., 
+
+	imm	MAPEN, t0
+	mtpr	r0, t0
+#	...
+	---
+
+
+####
+#
+# Exceptions
+
+# arithmetic exceptions -- traps
+-exc-into:
+	imm	1, t0
+	bcc	always, -exc-arith-exception	-- µ
+-exc-int-div-by-zero:
+	imm	2, t0
+	bcc	always, -exc-arith-exception	-- µ
+
+# floating overflow                 3
+# floating or decimal div-by-zero   4
+# floating underflow                5
+# decimal overflow                  6
+
+-exc-subscript-range:
+	imm	7, t0
+	bcc	always, -exc-arith-exception	-- µ
+
+
+# arithmetic exceptions -- faults
+# only floating overflow/div-by-zero/underflow, so we can ignore them.
+
+-exc-arith-exception:
+	# build arithmetic exception stack frame
+	# push type code (t0)
+	# push PC of next instruction to execute (r15)
+	# push PSL
+	# set new PSL
+	# set new PC
+	bcc	always, -scb-vector		-- µ
+	---
+
+
+# reserved operand, reserved addressing mode
+-exc-reserved-operand:
+-exc-reserved-addressing-mode:
+
+-exc-reserved:	# reserved instruction
+
+-exc-subset-emulation:
+-exc-suspended-emulation:
+
+-exc-mbz:
+
+-exc-bpt:
+
+-exc-access:
+
+
+####
+
+-chmx-entry:
+	# push sign extended code (o1)
+	# push PC of next instruction (r15)
+	# push old PSL
+	# set new PSL
+	# set new PC (t0)
+	bcc	always, -scb-vector		-- µ
+	---
+
+
+# Vector through SCB -- offset in t0
+-scb-vector:
+	imm	SCBB, t1
+	mfpr	t1, t1
+	add	t0, t1, t0	-- 32 µ
+	ldu	[t0], t0	-- 32
+	# <31:2> is the physical address to jump to.
+	# <1:0>:
+	#  00  try to use kernel stack
+	#  01  interrupt stack
+	#  10  service in "writable control store"! -- UNDEFINED
+	#  11  reserved -- UNDEFINED
+	imm	3, t1
+	and	t0, t1, t1	-- 32 µ
+	bcc	z, -scb-kernel-stack	-- µ
+	# use interrupt stack
+#	...
+	jmp	t0
+-scb-kernel-stack:
+#	...
+	---
+
+
+
+####
+#
+# pre/post fragments  (operands)
+#
+# The pre phase consists of the µcode for 0-6 operands, the post phase consists
+# of µcode for 0-2 operands.  In between, the µcode for the exe phase is executed.
+#
+# Operands are handled by 0-2 pre phase fragments and 0-1 post phase fragments.
+#
+# Pre phase fragments:
+#   imm, imm2
+#   regread, regread2
+#   memread, memread2
+#   memreadi
+#   vimm, v1imm
+#   vregread, v1regread
+#   vmemread, v1memread, v1memreadi
+#   addr
+#   branch
+#   resop			for illegal operands
+#
+# Post phase fragments:
+#   regwrite, regwrite2
+#   memwrite, memwrite2
+#   memwritei
+#   vregwrite
+#   vmemwrite, v1memwrite, v1memwritei
+#
+# regread2/regwrite2/memread2/memwrite2 read/write 2 32-bit words instead of
+# just 1.
+#
+# addr is actually shorthand for 16 different fragments for 20+ different
+# address modes!  (I never understood how DEC counted the address modes -- and
+# different sources count them differently.)
+#
+# How exactly each fragment is used is (kinda) described at the top of fragments.h.
+#
+#
+#
+#
+#
+# Operand modes (VAX notation vs "sane" notation)
+# -----------------------------------------------
+# 0_-3_ 		lit6				lit6
+#
+# 4_    6_		(Rn)[Rx]			[Rn     + index(Rx)]
+#       7_		-(Rn)[Rx]			[--Rn   + index(Rx)]
+#       8_		(Rn)+[Rx]			[Rn++   + index(Rx)]
+#       9_		@(Rn)+[Rx]			[[Rn++] + index(Rx)]
+#       9F		@#addr[Rx]			[addr   + index(Rx)]
+#       A_ C_ E_	((Rn + disp) + index(Rx))	[ Rn + disp  + index(Rx)]
+#       B_ D_ F_	(@(Rn + disp) + index(Rx))	[[Rn + disp] + index(Rx)]
+#       AF CF EF        X^addr[Rx]			[ PC + disp  + index(Rx)]
+#       BF DF FF	@X^addr[Rx]			[[PC + disp] + index(Rx)]
+#
+# Rx    Rn		register names in the two opspecs (Rn always last)
+#
+#      assert(Rn != Rx) for 4_ 7_, 4_ 8_, 4_ 9_ (because ++/--)
+#      assert(Rx != 15) for all 4_
+#      assert(Rn != 15) for 4_ 6_, 4_ 7_ 8_
+#
+#
+# 5_			Rn				Rn
+# 6_			(Rn)				[Rn]
+# 7_			-(Rn)				[--Rn]
+# 8_			(Rn)+				[Rn++]
+# 8F			I^#const			imm
+# 9_			@(Rn)+				[[Rn++]]
+# 9F			@#addr				[addr]
+# A_ C_ E_		X^disp(Rn)			[Rn + disp]
+# B_ D_ F_		@X^disp(Rn)			[[Rn + disp]]
+# AF CF EF		X^addr				[PC + disp]
+# BF DF FF		@X^addr				[[PC + disp]]
+#
+# assert(Rn+(width+3)/4 + 1 < 15)  -- r15 must not be read/written in mode 5_
+# assert(Rn != 15) in modes 6_, 7_
+#
+# addr = PC + disp <=> disp = addr - PC
+#
+#
+#
+# Operand modes (official name vs "sane" notation)
+# ------------------------------------------------
+# 0_-3_ 		lit6				lit6
+#
+# 4_    6_		register deferred indexed	[Rn     + index(Rx)]
+#       7_		autodec indexed			[--Rn   + index(Rx)]
+#       8_		autoinc	indexed			[Rn++   + index(Rx)]
+#       9_		autoinc deferred indexed	[[Rn++] + index(Rx)]
+#       9F		absolute indexed		[addr   + index(Rx)]
+#       A_ C_ E_	byte/word/long disp indexed	[Rn + disp   + index(Rx)]
+#       B_ D_ F_	byte/word/long disp def indexed	[[Rn + disp] + index(Rx)]
+#
+# 5_			register			Rn
+# 6_			register deferred 		[Rn]
+# 7_			autodec				[--Rn]
+# 8_			autoinc				[Rn++]
+# 8F			immediate			imm
+# 9_			autoinc deferred		[[Rn++]]
+# 9F			absolute			[addr]
+# A_ C_ E_		byte/word/long disp		[Rn + disp]
+# B_ D_ F_		byte/word/long disp def		[[Rn + disp]]
+# AF CF EF		byte/word/long relative		[PC + disp]
+# BF DF FF		byte/word/long relative def	[[PC + disp]]
+
+
+-resop:
+	---
+
+
+# pre/post phase fragments, immediates/registers/memory, normal operands
+#
+-imm:
+	imm	<imm>, <pre>
+	---
+-imm2:
+	imm	<imm>, <pre>
+	imm	<imm>, <pre>
+	---
+
+
+-regread:
+	mov	<Rn>, <pre>	-- <width> µ
+	---
+-regread2:
+	mov	<Rn>, <pre>	-- 32 µ
+	mov	<Rn>, <pre>	-- 32 µ
+	---
+
+
+-memread:
+	ld	[<pre>], <pre>	-- <width>
+	---
+-memread2:
+	mov	<pre>, t0	-- 32 µ
+	ld	[t0], <pre>	-- 32
+	++	t0,t1		-- 32
+	ld	[t1], <pre>	-- 32
+	---
+
+
+-regwrite:
+	mov	<exe>, <reg>	-- <width> µ
+	---
+-regwrite2:
+	mov	<exe>, <reg>	-- 32 µ
+	mov	<exe>, <reg>	-- 32 µ
+	---
+
+
+-memwrite:
+	mov	<pre>, t0	-- 32 µ
+	st	<exe>, [t0]	-- <width>
+	---
+-memwrite2:
+	mov	<pre>, t0	-- 32 µ
+	st	<exe>, [t0]	-- 32
+	++	t0,t1		-- 32
+	st	<exe>, [t1]	-- 32
+	---
+
+# interlocked modify (for ADAWI)
+-memreadi:
+	ldi	[<pre>], <pre>	-- <width>
+	---
+
+-memwritei:
+	mov	<pre>, t0	-- 32 µ
+	sti	<exe>, [t0]	-- <width>
+	---
+
+
+# bit fields
+-vimm:
+-v1imm:
+	---
+
+# assert(size <=u 31)
+# assert((size == 0) || (pos <=u 31)) // pos not checked iff size = 0
+-vregread:
+-v1regread:
+	---
+
+-vmemread:
+-v1memread:
+-v1memreadi:
+	---
+
+-vregwrite:
+-v1regwrite:
+-vmemwrite:
+-v1memwrite:
+-v1memwritei:
+	---
+
+
+# pre phase fragments, address calculation
+#
+-addr-[Rn_______+index(Rx)]:
+	[]	<Rx>, t0	-- <width>
+	add	<Rn>, t0, <pre> -- 32 µ
+	---
+
+-addr-[--Rn_____+index(Rx)]:
+	[]	<Rx>, t0	-- <width>
+	--	<Rn>, <Rn>	-- <width>
+	add	<Rn>, t0, <pre> -- 32 µ
+	---
+
+-addr-[Rn++_____+index(Rx)]:
+	[]	<Rx>, t0	-- <width>
+	add	<Rn>, t0, <pre> -- 32 µ
+	++	<Rn>, <Rn>	-- <width>
+	---
+
+-addr-[[Rn++]___+index(Rx)]:
+	[]	<Rx>, t0	-- <width>
+	++	<Rn>, <Rn>	-- <width>
+	ld	[<Rn>], t1	-- 32
+	add	t0, t1, <pre>   -- 32 µ
+	---
+
+-addr-[addr_____+index(Rx)]:
+	[]	<Rx>, t0	-- <width>
+	imm	<imm>, t1
+	add	t0, t1, <pre>   -- 32 µ
+	---
+
+-addr-[Rn+disp__+index(Rx)]:
+	[]	<Rx>, t0	-- <width>
+	add	<Rn>, t0, t0	-- 32 µ
+	imm	<imm>, t1
+	add	t0, t1, <pre>   -- 32 µ
+	---
+
+-addr-[[Rn+disp]+index(Rx)]:
+	[]	<Rx>, t0	-- <width>
+	imm	<imm>, t1
+	add	<Rn>, t1, t1	-- 32 µ
+	ld	[t1], t1	-- 32
+	add	t0, t1, <pre>   -- 32 µ
+	---
+
+-addr-[PC+disp+index(Rx)]:
+	readpc	t0
+	imm	<imm>, t1
+	add	t0, t1, t0	-- 32 µ
+	[]	<Rx>, t1	-- <width>
+	add	t0, t1, <pre>	-- 32 µ
+	---
+
+-addr-[[PC+disp]+index(Rx)]:
+	readpc	t0
+	imm	<imm>, t1
+	add	t0, t1, t0	-- 32 µ
+	ld	[t0], t0	-- 32
+	[]	<Rx>, t1	-- 32
+	add	t0, t1, <pre>	-- 32 µ
+	---
+
+-addr-[Rn]:
+	mov	<Rn>, <pre>	-- 32 µ
+	---
+
+-addr-[--Rn]:
+	--	<Rn>, <Rn>	-- <width>
+	mov	<Rn>, <pre>	-- 32 µ
+	---
+
+-addr-[Rn++]:
+	mov	<Rn>, <pre>	-- 32 µ
+	++	<Rn>, <Rn>	-- <width>
+	---
+
+-addr-[[Rn++]]:
+	ld	[<Rn>], <pre>	-- 32
+	++	<Rn>, <Rn>	-- 32
+	---
+
+-addr-[addr]:
+	imm	<imm>, <pre>
+	---
+
+-addr-[Rn+disp]:
+	imm	<imm>, t0
+	add	<Rn>, t0, <pre> -- 32 µ
+	---
+
+-addr-[[Rn+disp]]:
+	imm	<imm>, t0
+	add	<Rn>, t0, t0	-- 32 µ
+	ld	[t0], <pre>	-- 32
+	---
+
+
+-addr-[PC+disp]:
+	imm	<imm>, t0
+	readpc	t1
+	add	t0, t1, <pre>	-- 32 µ
+	---
+
+-addr-[[PC+disp]]:
+	imm	<imm>, t0
+	readpc	t1
+	add	t0, t1, t0	-- 32 µ
+	ld	[t0], <pre>	-- 32
+	---
+
+# branch operands -- all branches except CASE
+-branch:
+	imm	<imm>, t0
+	readpc	t1
+	add	t0, t1, t0	-- 32 µ
+	jmp	t0
+	---
+
+
+####
+#
+# ALU
+
+ADDB2:
+ADDB3:
+	add	   <pre>, <pre>, <exe>  --  8 arch
+	---
+
+ADAWI:	# interlocks handled by µpre/µpost -- there are special flows for
+        # interlocking mem read/write
+ADDW2:
+ADDW3:
+	add	   <pre>, <pre>, <exe>  -- 16 arch
+	---
+
+ADDL2:
+ADDL3:
+	add	   <pre>, <pre>, <exe>  -- 32 arch
+	---
+SUBB2:
+SUBB3:
+	sub	   <pre>, <pre>, <exe>  --  8 arch
+	---
+
+SUBW2:
+SUBW3:
+	sub	   <pre>, <pre>, <exe>  -- 16 arch
+	---
+
+SUBL2:
+SUBL3:
+	sub	   <pre>, <pre>, <exe>	-- 32 arch
+	---
+MULB2:
+MULB3:
+	mul	   <pre>, <pre>, <exe>	--  8 arch
+	---
+MULW2:
+MULW3:
+	mul	   <pre>, <pre>, <exe>	-- 16 arch
+	---
+MULL2:
+MULL3:
+	mul	   <pre>, <pre>, <exe>	-- 32 arch
+	---
+DIVB2:
+DIVB3:
+	div	<pre>, <pre>, <exe>	--  8 arch
+	---
+DIVW2:
+DIVW3:
+	div	<pre>, <pre>, <exe>	-- 16 arch
+	---
+DIVL2:
+DIVL3:
+	div	<pre>, <pre>, <exe>	-- 32 arch
+	---
+
+###
+
+BICB2:
+BICB3:
+	bic	<pre>, <pre>, <exe>	--  8 arch
+	---
+BICW2:
+BICW3:
+	bic	<pre>, <pre>, <exe>	-- 16 arch
+	---
+BICL2:
+BICL3:
+	bic	<pre>, <pre>, <exe>	-- 32 arch
+	---
+BISB2:
+BISB3:
+	bis	<pre>, <pre>, <exe>	--  8 arch
+	---
+BISW2:
+BISW3:
+	bis	<pre>, <pre>, <exe>	-- 16 arch
+	---
+BISL2:
+BISL3:
+	bis	<pre>, <pre>, <exe>	-- 32 arch
+	---
+
+###
+
+XORB2:
+XORB3:
+	xor	<pre>, <pre>, <exe>	--  8 arch
+	---
+
+XORW2:
+XORW3:
+	xor	<pre>, <pre>, <exe>	-- 16 arch
+	---
+
+XORL2:
+XORL3:
+	xor	<pre>, <pre>, <exe>	-- 32 arch
+	---
+
+###
+
+ASHL:
+	ashl	<pre>, <pre>, <exe>	-- arch
+	---
+#ASHQ:
+	ashq	<pre>, <pre>, <exe>	-- arch
+
+ROTL:
+	rotl	<pre>, <pre>, <exe>	-- arch
+	---
+
+###
+
+ADWC:
+	adc	<pre>, <pre>, <exe>	-- 32 arch
+	---
+SBWC:
+	sbb	<pre>, <pre>, <exe>	-- 32 arch
+	---
+
+###
+
+CLRB:
+	imm	0, t0
+	mov	t0, <exe>	--  8 arch	# set flags
+	---
+CLRW:
+	imm	0, t0
+	mov	t0, <exe>	-- 16 arch	# set flags
+	---
+CLRL:
+	imm	0, t0
+	mov	t0, <exe>	-- 32 arch	# set flags
+	---
+CLRQ:
+	imm	0, t0
+	mov	t0, <exe>	-- 32 arch
+	mov 	t0, <exe>	-- 32 arch
+	# flags?!
+	---
+
+###
+
+DECB:
+	imm	1, t0
+	sub	<pre>, t0, <exe>	--  8 arch
+	---
+DECW:
+	imm	1, t0
+	sub	<pre>, t0, <exe>	-- 16 arch
+	---
+DECL:
+	imm	1, t0
+	sub	<pre>, t0, <exe>	-- 32 arch
+	---
+
+INCB:
+	imm	1, t0
+	add	<pre>, t0, <exe>	--  8 arch
+	---
+INCW:
+	imm	1, t0
+	add	<pre>, t0, <exe>	-- 16 arch
+	---
+INCL:
+	imm	1, t0
+	add	<pre>, t0, <exe>	-- 32 arch
+	---
+
+###
+
+CMPB:
+CMPW:
+CMPL:
+	cmp	<pre>, <pre>		-- <width> arch
+	---
+
+TSTB:
+TSTW:
+TSTL:
+	imm	0, t0
+	cmp	<pre>, t0		--  <width> arch
+	---
+
+
+###
+
+CVTBL:
+	signbl	<pre>, <exe>		--  arch
+	---
+CVTBW:
+	signbw	<pre>, <exe>		--  arch
+	---
+CVTWL:
+	signwl	<pre>, <exe>		--  arch
+	---
+
+CVTLW:
+	trunclw	<pre>, <exe>		-- arch
+	---
+CVTLB:
+	trunclb <pre>, <exe>		-- arch
+	---
+CVTWB:
+	truncwb	<pre>, <exe>		-- arch
+	---
+
+
+###
+
+
+MOVB:
+MOVW:
+MOVL:	mov	<pre>, <exe>		--  <width> arch
+	---
+MOVQ:	mov	<pre>, <exe>		-- 32 arch
+	movx	<pre>, <exe>		-- 32 arch	# movx for the flag handling
+	---
+
+MCOMB:	imm	0xFFFF_FFFF, t1
+	xor	<pre>, t1, <exe>	--  8 arch
+	---
+MCOMW:	imm	0xFFFF_FFFF, t1
+	xor	<pre>, t1, <exe>	-- 16 arch
+	---
+MCOML:	imm	0xFFFF_FFFF, t1
+	xor	<pre>, t1, <exe>	-- 32 arch
+	---
+
+MNEGB:
+MNEGW:
+MNEGL:	imm	0, t1
+	sub	<pre>, t1, <exe>	-- <width> arch
+	---
+
+MOVZBW:	zerobw	<pre>, <exe>		-- arch
+	---
+MOVZBL:	zerobl	<pre>, <exe>		-- arch
+	---
+MOVZWL:	zerowl	<pre>, <exe>		-- arch
+	---
+
+
+####
+#
+# ADDR
+
+MOVAB:
+MOVAW:
+MOVAL:
+MOVAQ:	mov	<pre>, <exe>		--  32 arch
+	---
+
+PUSHL:	--	sp, sp		-- 32
+	st	<pre>, [sp]	-- 32
+	---
+
+PUSHAB:
+PUSHAW:
+PUSHAL:
+PUSHAQ:
+	--	sp, sp		-- 32
+	st	<pre>, [sp]	-- 32
+	---
+
+
+
+####
+#
+# CONTROL
+
+# Bcc
+BNEQ:
+BEQL:
+BGTR:
+BLEQ:
+BGEQ:
+BLSS:
+BGTRU:
+BLEQU:
+BVC:
+BVS:
+BCC:	# BGEQU
+BCS:	# BLSSU:
+	bcc	<cc>, -br		-- arch
+	---
+
+JMP:
+-br:
+	jmp	<pre>
+	---
+
+##
+
+# Branch on Low Bit (Clear|Set)
+BLBC:
+BLBS:
+				
+# Branch on Bit (Clear|Set)
+BBC:
+BBS:
+
+# Branch on Bit Clear and Set
+BBCS:
+
+# Branch on Bit Set and Clear
+BBSC:
+
+# Branch on Bit Clear and Clear [Interlocked]
+BBCC:
+BBCCI:
+
+# Branch on Bit Set and Set [Interlocked]
+BBSS:
+BBSSI:
+
+
+##
+
+# Jump to Subroutine
+# Branch to Subroutine, Byte/Word
+JSB:
+BSBB:
+BSBW:
+	imm	4, t0
+	sub	r14, t0, r14	-- 32 µ
+	st	r15, [r14]	-- 32
+	jmp	<pre>
+	---
+
+
+# Return from Subroutine
+RSB:
+	ld	[r14], t1	-- 32
+	imm	4, t0
+	add	r14, t0, r14	-- 32 µ
+	jmp	t1
+	---
+
+##
+
+# Add Compare and Branch (Byte|Word|Long)
+ACBB:
+ACBW:
+ACBL:
+
+# Add One and Branch if LEQ (<=)
+AOBLEQ:
+
+# Add One and Branch if LSS (<)
+AOBLSS:
+
+# Subtract One and Branch if GEQ (>=)
+SOBGEQ:
+
+# Subtract One and Branch if GTR (>)
+SOBGTR:
+
+
+##
+
+CASEB:
+#	...
+	add	t0, t0, t0	--  8 µ
+	add	t0, t0, t0	--  8 µ
+	b	-CASE
+	---
+CASEW:
+#	...
+	add	t0, t0, t0	-- 16 µ
+	add	t0, t0, t0	-- 16 µ
+	b	-CASE
+	---
+CASEL:
+#	...
+	add	t0, t0, t0	-- 32 µ
+	add	t0, t0, t0	-- 32 µ
+	b	-CASE
+	---
+
+-CASE:	ld	[t0], t0	-- 32
+	jmp	t0
+	---
+
+
+####
+#
+# CALL/RET
+
+CALLS:
+CALLG:
+RET:
+
+
+#####
+#
+# QUEUES
+
+INSQUE:
+INSQHI:
+INSQTI:
+REMQUE:
+REMQHI:
+REMQTI:
+
+
+####
+#
+# BITFIELDS
+
+CMPV:
+	---
+CMPZV:
+	---
+EXTV:
+	---
+EXTZV:
+	---
+INSV:
+	---
+FFC:
+	---
+FFS:
+	---
+
+
+####
+#
+# STRINGS
+
+MOVC3:
+MOVC5:
+	---
+
+#CMPC3:
+#CMPC5:
+
+#LOCC:
+#SCANC:
+#SKPC:
+#SPANC:
+
+
+####
+#
+# MISC
+
+BICPSW:
+	mov	psl, t0		-- 16 µ
+	bic	t0, <pre>, t0	-- 16 µ
+	mov	t0, psl		-- 16 µ		# upper 16 PSL bits are safe
+	---
+
+BISPSW:
+	mov	psl, t0		-- 16 µ
+	bis	t0, <pre>, t0	-- 16 µ
+	mov	t0, psl		-- 16 µ		# upper 16 PSL bits are safe
+	---
+
+BPT:
+	imm	0x124, t0
+	exc	always,	-exc-bpt -- µ
+	---
+
+INDEX:
+	# this code needs to read some input registers several times so it
+	# makes sense to hardcode the register names instead of using the
+	# <pre> template mechanism.
+	sub	p1, p2, t0	-- 32 µ
+	bcc	<, -INDEX_LOW	-- µ
+	add	p1, p3, p1	-- 32 µ
+	sub	p1, p2, t0	-- 32 µ
+	bcc	>=, -INDEX_HI	-- µ
+	mov	p3, <exe>	-- 32 µ
+	---
+
+-index_low:
+-index_hi:
+
+
+MOVPSL:
+	---
+
+NOP:
+	---
+
+POPR:
+	---
+PUSHR:
+	---
+
+HALT:
+	nop
+	stop
+	commit
+	rollback
+	---
+
+
+
+####
+#
+#
+
+REI:
+
+CHMK:
+CHMS:
+CHME:
+CHMU:
+
+
+PROBER:
+PROBEW:
+
+MFPR:
+	mfpr	<pre>, <exe>
+	---
+MTPR:
+	mtpr	<pre>, <pre>
+	---
+
+
+SVPCTX:
+	imm	SCBB, t0
+	mfpr	t0, t0
+
+	st	r0, [t0]	-- 32
+	++	t0, t0		-- 32
+	st	r1, [t0]	-- 32
+	++	t0, t0		-- 32
+	st	r2, [t0]	-- 32
+	++	t0, t0		-- 32
+	st	r3, [t0]	-- 32
+	++	t0, t0		-- 32
+	st	r4, [t0]	-- 32
+	++	t0, t0		-- 32
+	st	r5, [t0]	-- 32
+	++	t0, t0		-- 32
+	st	r6, [t0]	-- 32
+	++	t0, t0		-- 32
+	st	r7, [t0]	-- 32
+	++	t0, t0		-- 32
+	st	r8, [t0]	-- 32
+	++	t0, t0		-- 32
+	st	r9, [t0]	-- 32
+	++	t0, t0		-- 32
+	st	r10, [t0]	-- 32
+	++	t0, t0		-- 32
+	st	r11, [t0]	-- 32
+	++	t0, t0		-- 32
+	st	r12, [t0]	-- 32
+	++	t0, t0		-- 32
+	st	r13, [t0]	-- 32
+	++	t0, t0		-- 32
+	st	r14, [t0]	-- 32
+	++	t0, t0		-- 32
+	st	r15, [t0]	-- 32
+	++	t0, t0		-- 32
+	---	
+
+
+LDPCTX:
+	imm	SCBB, t0
+	mfpr	t0, t0
+	ld	[t0], r0	-- 32
+	++	t0, t0		-- 32
+	ld	[t0], r1	-- 32
+	++	t0, t0		-- 32
+	ld	[t0], r2	-- 32
+	++	t0, t0		-- 32
+	ld	[t0], r3	-- 32
+	++	t0, t0		-- 32
+	ld	[t0], r4	-- 32
+	++	t0, t0		-- 32
+	ld	[t0], r5	-- 32
+	++	t0, t0		-- 32
+	ld	[t0], r6	-- 32
+	++	t0, t0		-- 32
+	ld	[t0], r7	-- 32
+	++	t0, t0		-- 32
+	ld	[t0], r8	-- 32
+	++	t0, t0		-- 32
+	ld	[t0], r9	-- 32
+	++	t0, t0		-- 32
+	ld	[t0], r10	-- 32
+	++	t0, t0		-- 32
+	ld	[t0], r11	-- 32
+	++	t0, t0		-- 32
+	ld	[t0], r12	-- 32
+	++	t0, t0		-- 32
+	ld	[t0], r13	-- 32
+	++	t0, t0		-- 32
+	ld	[t0], r14	-- 32
+	++	t0, t0		-- 32
+	ld	[t0], r15	-- 32
+	++	t0, t0		-- 32
+	---
+
+
+
+

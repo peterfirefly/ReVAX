@@ -1,0 +1,313 @@
+Trænger gevaldigt til redigering/renskrivning!
+
+En del af det er ikke korrekt, en del detaljer mangler at blive skrevet.  Næsten
+alt bør stå i en anden rækkefølge.
+
+
+
+ODS-2
+---
+
+
+ods2 readers.  Mange forskellige versioner, stammer fra samme getvms-program fra
+ca '82.  Meget grim og forældet kode.  Ofte udvidet med mere grimhed og bugs.
+Har lavet en version der retter op på det.
+
+
+Overraskende hvor lidt afhængig ODS2 er af in-memory datastrukturer.  Næsten
+alt ligger på disken, også selv om det kun bruges mens filsystemet er mountet.
+Meget designet for maskiner med meget lidt RAM, med meget lidt dynamisk allokering,
+statisk modul-lokal allokering, evt. så (næsten) hele filsystemskode + data
+kan droppes fra memory.
+
+Det må betyde at ODS2 er en del mere write happy end så mange andre filsystemer?
+
+diskstruktur
+filallokering -- extents?  blocks?
+hvor stor klyngestørrelsen?
+
+Blokke à 512 bytes.
+Clusters à la FAT.  Oprindeligt 3 blokke i træk, senere en del mere.
+Tilsyneladende extents-baseret?!  Ja, med en besynderlig kompressionsmetode.
+
+Filer fås i flere typer.  De er ikke blot bytesekvenser :(
+Textfiler er en sekvens af blokke der hver har en variabel-længde streng (2
+bytes til længden).  Strengene går tilsyneladende ikke ud over den blok de
+ligger i.
+
+ fixed-length -- all records in the file have the same length
+ variable-len -- records vary in length and every record is prefixed by a count byte
+ var-len w/ fix-len ctrl
+              -- all records have variable length but are prefixed by a fixed-length
+                 control block
+ stream       -- records vary in length, and every record is separated from the
+                 next one by a termination character.  A text file is an
+                 example of a stream-format file using line feed or carriage
+                 return to separate records.
+                 
+                 STREAM    - terminated by CRLF
+                 STREAM_CR - terminated by CR
+                 STREAM_LF - terminated by LF
+
+
+Hver fil på en Files-11 disk har en unik file identification (FID): en trippel
+af file number (NUM), file sequence number (SEQ), relative volume number (RVN).
+
+Grundlæggende blokorienteret.  Blok = 512 bytes.  Blokke kan læses fra device
+via logiske bloknumre (LBN, starter med 0).  Blokke kan læses fra filer/directories/
+interne filsystemtabeller med virtuelle bloknumre (VBN, starter med 1).
+Ok, lidt løgn.  Indexfilens VBN 1 og 2 behøver ikke være mappet til LBN 0 og 1.
+Det er de ikke hvis der er nogle meget uheldige dårlige sektorer, fx.
+
+Graden af abstraktionsgenbrug hen over mange lag er overvældende i Files-11.
+
+Det centrale er en bloksekvens.  Alle bloksekvenser er markeret som allokerede,
+de har en file header, de har en VBN -> LBN mapping.  De fleste har også et
+navn.  Spool filer har ikke navne.
+
+Filer kan godt åbnes af flere programmer samtidig.  Ja, det er (svagt) synligt
+i diskstrukturerne.
+
+Et navn = en fil.  Ingen hardlinks.  Ingen symlinks.
+Et stort set af attributer for filer, ikke blot "readable"/"writeable"/...
+Det er ikke i fri ASCII-form men det er variable-length.
+
+I/O har to faser: navneopslag og fil I/O.  Navneopslag giver en (RVN, NUM, SEQ)-
+trippel.  Den bruger man til al fil I/O.  NUM er et index i en lineær tabel over
+alle mappings.  Et filsystem kan fylde flere diske, derfor har man RVN til at
+sige hvilken disk filens mapping står i.  SEQ bruges for at undgå stale pointers.
+
+Alle ondisk strukturer i Files-11 har navne og mappings.  Det eneste der ligger
+på en fast plads er boot blocken (LBN 0) = indexfilens første blok (VBN 1) og
+filsystemets home block (LBN 1) = indexfiles anden blok (VBN 2).
+
+Root directory hedder 000000.DIR.
+Index hedder INDEXF.SYS.
+Allokeringsbitmap hedder BITMAP.SYS.
+
+Der er mange særlige "filer" i Files-11, men de eneste to jeg behøver at tage
+mig af for at læse ODS-2 diske er INDEXF.SYS og 000000.DIR ("root" directory).
+
+
+Indexfilen har en header.  Derefter et lineært array af file entries (kaldet
+"(file) headers").
+File entries fylder altid det samme: 1 blok = 512 bytes (eller 256?).
+Nogle filer har behov for mere plads til at beskrive attributlisten eller hvor
+datablokkene ligger på disken.  Derfor kan der være en enkelt-hægtet liste af
+extension file headers.  Hver header har en fixed-len start + pointere til
+hvor mapping og attributter starter.  Ikke al pladsen behøver blive udnyttet.
+Man skal forestille sig at alle file headers på listen bliver konkateneret til
+en enkelt sammenhængende blok (op til 64K).
+
+Directories har en header.
+
+Derefter et lineært array af directory entries, men de er pakket sjovt.  Igen
+er det tydeligt at Files-11 grundlæggende er blokorienteret.  Hver directory
+blok kan indeholde et eller flere variable-length directory records, som ligger
+lige efter hinanden fra starten af blokken.  Hver record begynder med et længdefelt.
+Sekvensen af records er termineret med $FFFF.
+
+Entries i directories er sorteret alfabetisk.  Dvs at oprettelse af en ny fil
+kan føre til genskrivning af hele directories?!  Skriver man en ny kopi først
+eller risikerer man totalsmadring af filsystemet?
+
+Directories er organiserede som sekventiel fil med var-len records.  NO_SPAN-
+bit (records may not cross block boundaries).  Ingen carriage control attributes.
+
+Records ligger altid word-aligned i en blok.  Pad med zero.
+
+NAME og TYPE er hver begrænset til 39 ASCII tegn.  '.' i mellem NAME og TYPE,
+selv hvis NAME/TYPE er tomme.  Pad med '\0' hvis ulige længde.
+
+000000.DIR ligger først i sig selv (pga den alfabetiske sortering).
+
+Indexfilen har fil-id 1,1.
+
+Klyngestørrelsen står i home block.
+
+Indexfilens bitmap (= de blokke den fylder)... ?
+
+W_PROTECT  volume protection code
+  system/owner/group/world, 4 bits hver, i alt 16 bits.
+
+B_WINDOW default window size.  Number of retrieval pointers that are used for
+  the window (in core file access data)...
+
+Index file bitmap: bitmap af hvilke entries i index file der er i brug (bit sat).
+Bruges kun ved allokering, redigeres ved sletning.  Ignoreres helt ved alm.
+fillæsning.
+
+File headers i resten af indexfilen.  De første 16 file headers ligger lige efter
+bitmappen, så de er nemme at finde.  Resten kan ligge hvor som helst.
+
+Filer (egtl. ting der har file headers, om de er filer eller ej), har protection
+bits.  Det er system/owner/group/world bits for read/write/execute/delete.
+
+B_MAP_INUSE antal map words in use.
+
+Navneområdet er optional i file headers.  Indeholder primært navn for filen.
+I alt op til 86 tegn til navnet: 80 for navn/punktum/type og 6 for ';xxxxx'.
+Fyld ud med spaces.
+
+Map: en sekvens af extent beskrivelser.  En extent er 1..256 sammenhængende
+logiske blokke.  Hver extent beskrives med et tal 1..256 (repræsenteret som 0..255)
+og nummeret på første logiske block i vores extent.  Havde regnet med at det
+ville være klyngenummeret, men det ser det ikke ud til.
+
+Hver extent beskrivelse fylder 1, 2, 3 eller 4 words.  De to højeste bits i
+første word angiver formattet og størrelsen.
+
+Der er 4 formater for retrieval pointers (extent beskrivelser):
+ RPF 0 - "placement header".  2 bytes.
+         ikke en extent beskrivelse!  Det er et notat af valgte placement
+         options da filen blev oprettet.
+ RPF 1 - 4 bytes, 8-bit block count (1..256 blokke), 22-bit LBN.
+         Dvs nok til at supporte 2GB!
+ RPF 2 - 6 bytes, 14-bit block count, 32-bit LBN.
+ RPF 3 - 8 bytes, 30-bit block count, 32-bit LBN.
+
+Sparse ikke supportet.
+
+NUM = hvor i INDEXF.SYS metadataene ligger.
+SEQ = generation number, bliver talt op hver gang det samme entry i INDEXF.SYS
+      bliver genbrugt (dvs efter sletning og dannelse af ny fil i samme slot).
+RVN = hvilken volume i et volume set?  (når man har en logisk disk bestående
+      af flere fysiske diske)
+
+
+En directory file er en særlig fil.  Liste af filnavne, filversionsnumbre og 
+FID'er.
+
+block 1 = boot block, har en pointer til "primary bootstrap image".
+   ligger på "logical block 0".
+
+block 2 = primary home block.  Indeholder volume name, location of the extents
+          comprising the remainder of the index file, the volume owner's UIC,
+          and the volume protection information.
+          
+          There are normally several additional copies of the home block, known
+          as the secondary home blocks, to allow recovery of the volume if it
+          is lost or damaged.
+
+
+---
+Resten af index filen is composed of "file headers", which describe the extents
+allocated to the files residing on the volume, and file metadata such as the
+owner UIC, ACLs and protection information.  Each file is described by one *or
+more* file headers.  More than one can be required when a file has a large
+number of extents.  The file header is a fixed-length block, but contains both
+fixed and variable-length sections.
+
+  o header contains the NUM and SEQ, the protection (security) information,
+    and the location(s) of the rest of the file header.
+  o ident section contains the accounting metadata: the filename, creation and
+    modification times, and the time of the last backup.
+  o the map describes which physical disk blocks (extents) map to each virtual
+    block of the file.
+  o the access control list contains the ACL information for the file.
+  o the reserved area is space at the end of the file header which is not used
+    by the operating system.  (customer/vendor specific information).
+  o the last two bytes of the header are a checksum of the previous 255 words
+---
+
+
+MFD - Master File Directory
+ 000000.DIR   -- MFD selv
+ INDEXF.SYS   -- index file -- cirka en lineær tabel af inodes.
+ BITMAP.SYS   -- storage bitmap file (hvilke blokke er frie/allokerede?)
+                 Storage Control Block (SCB) + bitmap for klynger, ikke blokke.
+
+ BADBLK.SYS   -- bad block file
+ CORIMG.SYS   -- core image file -- fx til swap
+ VOLSET.SYS   -- volume set list file?!
+ CONTIN.SYS   -- continuation file ?!
+ BACKUP.SYS   -- backup log file
+ BADLOG.SYS   -- pending bad block
+ 
+
+Directories er sjove.  Der er en (pakket) tabel af directory entries med et
+navn + en liste af (version, file_id) tupler.  Sådan supporter man flere versioner
+af filer i filsystemet!
+
+Ved ikke hvorfor navnet står både i Directory Entry og File Header.
+
+Nogle filer er "reserved" og har faste file id's.  Det er fx INDEXF.SYS, 000000.DIR,
+osv.
+
+Supporter en eller anden mærkelig form for journaling.  Det har noget med RMS
+at gøre.  Bruger Access Control Entries.
+
+
+Eller måske supporter den faktisk noget i stil med hard links?  Man behøver ikke
+at have et count af antal indgående links i hver inode hvis man bare kan smide
+gamle pointere ud vha sekvensnumrene.
+
+
+Mount/check
+---
+Læs "root block".
+
+
+
+Hvordan virker en directory-søgning?
+---
+Læs lineært igennem array i directoryfil.  Der står i headeren hvor mange
+entries man skal søge igennem -- man skal ikke nødvendigvis gå hele arrayet
+igennem.
+
+Nogle entries springes over fordi de ikke er valid.  Men hvordan?  Uklart hvordan
+man angiver at en fil er slettet.
+
+Navnene er sorteret alfabetisk, så man kan godt lave en relativt hurtig søgning
+hvis man gider.
+
+Nogle af filoplysningerne (læse-/skrive-/etc-rettigheder, ejer, tidsstempler,
+RMS-modes?) står i directory.  Andre står i file header.
+
+
+
+Hvordan læser man en fil?
+---
+Hvis vi har FID er det nemt:
+ o læs file header (læs den rette virtuelle blok i indexfilen)
+ o evt. validitetschecks
+ o læs RMS-mode (hvis ikke vi bare vil have alle blokkene binært)
+ o gennemløb map -- rarest hvis vi simpelthen læser alle extension file headers
+   i et hug til et 64K array
+ o map siger hvilke logiske blokke der ligger hvor.
+ o map gennemløb nemmest hvis vi gør det sekventielt fra start til slut
+ o tag evt højde for EOF mark (en del af RMS-data)
+
+Hvis det skal læses à la RMS:
+ o variable length records
+   kan der være flere var-len records i samme blok?  Det mener jeg.
+ o indsæt evt. kunstige CR/LF efter hver post
+
+Bøvl:
+ o hvis der er extension file headers
+ o hvis NOSPAN-flaget ikke er sat.  Records der går henover blokke er irriterende.
+   Kan håndteres lidt à la LZSS-dekodere: sørg for at der altid er en ekstra
+   blok i bufferen inden man ekspanderer en post.
+
+
+
+Hvordan skriver man en fil?
+---
+%
+
+Hvordan allokerer man blokke?
+---
+%
+
+Hvordan gør man en fil kortere?
+---
+Kan subdirectories gøres kortere?  Er der garbage collection i subdirtabeller?
+
+%
+
+Hvordan sletter man en fil?
+---
+Man sætter bl.a. en bit i directory entry (eller file header?) der siger at den
+skal slettes når den sidste bruger har lukket den.
+
+

@@ -1,0 +1,69 @@
+# coexistence with Mercurial
+.hg
+.hgignore
+
+# backup files
+*~
+
+# a2ps output
+*.ps
+
+# executables -- standard programs
+asm
+dis
+sim
+
+# executables -- internal tools/test/experiments
+a.out
+src/fragtable
+
+misc/regalloc
+idioms
+fp-ieee
+
+test-big-int
+test-fp
+test-op
+test-alu
+test-analyze
+
+afl-test-big-int
+afl-test-fp
+afl-test-op
+afl-test-alu
+afl-test-analyze
+
+# gcc/clang output
+*.o
+*.s
+
+# generated source code files
+src/vax-instr.h
+src/vax-instr.pl
+src/vax-ucode.h
+src/vax-fraglists.h
+src/op-asm.h
+src/op-dis.h
+src/op-sim.h
+src/op-val.h
+
+# small VAX test programs
+runtime/test*.bin
+
+# disassembled VAX code
+runtime/*.asm
+runtime/*.lst
+runtime/*.html
+*.asm
+*.lst
+*.html
+
+# coverage analysis
+*.gcda
+*.gcno
+*.info
+cov
+
+# AFL tests
+afl/
+

@@ -1,0 +1,2285 @@
+DEC terminology
+---
+
+Main CPU blocks:
+
+I box (Instruction)
+E box (Execution)
+M box (Memory)
+
+I/E/M correspond roughly to fetch+decode/exe/mem in a 5-stage pipeline, except
+that it wasn't really a full pipeline.
+Write-back (to registers) happened in the E box.
+Part of the fetch happened in I box, part in M box.
+
+Other blocks:
+
+Microsequencer/control store
+Bus Interface Unit	-- bus logic, latches, rotators (unaligned access)
+Interrupts
+Memory subsystem        -- instruction fetch/prefetch, load/store, I/O, unaligned access,
+			   cross page access
+Console subsystem
+
+The early VAXen decoded operands partly or completely in microcode.  VAX 9000
+and NVAX had hardware for it.
+
+Operand handling can be split into two parts: actually decoding the operand
+and putting the operand data into the right registers.  As time progressed,
+VAX implementations did less and less of the former but they kept using
+microcode to do the latter (until VAX 9000/NVAX).
+
+Decoding an instruction -- pre/exe/post -- is done via a state machine
+in the microcode on the VAX 11/780.  Nautilus/CVAX use a state machine in the
+I box so there's no longer any trace of it in the microcode.
+
+16-way cases in the microcode common to decode operands.  I think a few of them
+used 8-way cases.  n-way cases: take 4 (3) bits from the upper nibble in an
+opspec or opcode, jump to <addr> + <n> << x.  x is often 4/8, I think.  I also
+think the targets had to be aligned so there wasn't actually any addition
+involved in generating the µaddress.
+
+There is a microcode tool that lays out the pieces of microcode so that the
+cases work and so that unused space after each of the 16 (8) branch targets
+would be filled with useful code.
+
+
+Typical microcode would be 1600 words of roughly 40 bits.  Rigel uses 50 bits.
+VAX 8800 uses 100+ bits.
+
+CVAX implemented on "ZMOS" (CMOS1, 2µ, 2 metal layers) with FO4 delay = 2ns.
+10-14 MHz.  Kinda slow.  Even at an outrageous FO4 of 20 (40ns per cycle), it
+should run at 25MHz.  They ran it at 71-100ns per cycle!
+
+CVAX had 8-way cases.
+
+
+
+
+
+---------------
+Conceptual microarchitecture
+
+
+         Fetch  <------ I$/Mem
+          |
+          v
+         Decode - looks at instruction bytes, outputs µops
+                  (read from ROM, fills in certain fields in the µops such
+                  as immediates, register numbers, and condition codes)
+          |
+          v
+         Regs   - reads 2 32-bit registers (architected or internal), can also
+                write 1 32-bit register (or its smaller 8 or 16-bit equivalent).
+          |
+          v
+ flags<->ALU    - +-*/ shift/rot and/or/xor/and-not signext zeroext mul/div
+          |
+          v
+         MEM    <-----> D$/mem
+
+  Instruction fetch and load/store go through a memory translation mechanism
+  that also checks for access privilege for the given access type and the
+  current privilege level.
+
+
+Conceptual datapath
+
+   64-bit shifter/rotater not shown.
+   register transaction mechanism not shown.
+   forwarding paths (that make the µcode go fast by saving some pipeline stalls)
+   also not shown.
+
+   stalling mechanism not shown (mul/div, shift/rotate, fp can all be multicycle).
+   write enable signal to the register file not shown.
+   immediate handling not shown.
+
+
+              src1         src2                          dst   width
+               |            |                             |     |
+               / 5          / 5                          5/     |
+               |            |                             | +---+
+               v            v                             | |
+          +----------------------+   5                    | |
+          |                      |<--/-- dst ----------+  | |
+          |                      |<----- width ------+ |  | |
+          |                      |                   | |  | |
+          |                      |/-------------+    | |  | |
+          | 32-bit register file |              |    | |  | |
+          |                      |\---------+   |    | |  | |
+          +--- 1 ---------- 2 ---+          |   |    | |  | |
+             |   |        |   |             |   |    | |  | |
+             |   |        |   |             |   |    | |  | |
+      +------|   |        |   |             |   |    | |  | |
+      |      |   |        |   |             |   |    | |  | |
+      |   +--|   |        |   |             |   |    | |  | |
+      |   |  |   |        |   |             |   |    | |  | |
+      \   /  |   |        |   |             |   |    | |  | |
+    -----------------------------------   -------------------- pipeline
+             |   |        |   |             |   |    | |  | |  latches
+             |   |        |   |             |   |    | +--+ |
+             \   /        \   /             |   |    +------+
+          +---------\   /-------+           |   |
+           \         \ /        /           |   |
+            \                  /            |   |
+  Flags <===>\      ALU       /<--- op      |   |
+  (µ/arch)    \              /<---- width   |   |
+               +------------+               |   |
+                    |   |                   |   |
+                    |   |                   |   |
+                    |   +-------------------+   |
+                    |                           |
+      |  |   |      |   +-----------------------+
+      |  |   |      |   |
+      |  |   |      \   /
+      v  \   /       \ /
+    ------------------------------------
+     width val      addr  
+
+      memory load/store
+
+
+The ALU needs to know the width in order to output the correct flags.
+The register file needs to know whether to write 8/16/32 bits.  This is
+necessary to handle instructions like ADDB r0, r1, r2: the flags must be set
+based on addition of the lower 8 bits of r0/r1, only the low 8 bits of r2 may
+be changed.
+
+Zero/sign extension happens in the ALU.
+
+Forwarding and stalls (and most of the pipeline) isn't actually simulated by
+the simulator.  They are just what a realistic hardware implementation would
+have.
+
+The simulator doesn't have TLBs -- memory translation is performed for every
+memory access unless explicitly untranslated.  A realistic hardware implementation
+would have TLBs and would raise µexceptions in case of TLB misses, with the
+page table walk performed in µcode.
+
+PSL and some of the Internal Processor Registers are sort of like registers --
+they are part of the register bank and have 2 read ports and 1 write ports.
+
+When reading PSL, the flag bits (µ or arch) are mixed in as the lower 4 bits.
+Similarly, when writing to the PSL, the lower 4 bits end up in the flags (µ or arch).
+
+Partial width results make forwarding annoying.  A forwarding path can only be
+used if the width needed for the input is less than or equal to the width of
+the forwarded result.
+
+/*   VAX simulator -- a simple, straightforward VAX simulator.
+
+     It is not a complete simulator yet:
+       - it does not emulate ANY hardware yet
+       - it doesn't handle traps properly
+       - it doesn't handle interrupts properly -- but there is also no hardware
+         to generate interrupts ;)
+       - queue instructions are not implemented
+       - bit field instructions are not implemented
+       - some of the weirder instructions are not implemented and should be
+         emulated by ROM code.  This is how CVAX and many other VAX implementations
+         worked.  Unfortunately, the emulation trap isn't implemented yet.
+
+     None of the code has been seriously tested yet.
+
+     The code is intended to be smaller and easier to understand than the three
+     other open-source VAX simulators that I know of (SimH, ts10, evax).
+
+     It should be simple enough to be used as a "ground truth" model of VAX
+     behaviour.
+
+     Why is it so simple and understandable?
+       - there is no TLB -- all memory accesses go through a single function
+         which is responsible for doing all the necessary memory address
+         translation every time.
+         This makes the code slightly slower but we don't have to care about
+         TLB misses/invalidation or TLB reloads through page walks.
+       - all the "behaviour" of each instruction/operand is explicitly listed
+         in "microcode".
+       - there is very little C code in sim.c -- almost all the decoding
+         is table driven and/or uses a compiled form of the "microcode".
+       - there IS code for tracing/disassembling the microcode so it is easy
+         to see what the actual behaviour of an instruction is.
+       - the microcode instructions are simple RISC-like instructions with nice,
+         clean semantics.
+
+     The micro machine is a load/store/immediate machine with 3-address instructions
+     to operate on data, load/immediate instructions to get data into the micro
+     machine, a store instruction to get data out of the micro machine, plus
+     a few extra instructions for branching, taking exceptions, comitting/rolling
+     back, extended division/multiplication, sign/zero extension, processor
+     registers, etc.
+
+     It contains a dozen extra registers on top of the 16 VAX registers -- round
+     about 30 in total.  It also uses transactions to speculatively execute
+     instructions (with autoinc/dec of registers in some operands).  If the
+     whole instruction succeeds, the registers get committed, otherwise they
+     get rolled back.  There are micro instructions for this.
+
+     The micro machine contains two sets of flags ("condition codes"), one of
+     them being the architected set and the other being for microcode use.
+     All micro instructions that use flags have a bit that indicates which flag
+     set to use.
+
+     All control-flow handling inside the microcode is handled by a single
+     micro instruction which has a 4-bit condition field with the same interpre-
+     tation as the low 4 bits of the Bcc VAX instructions.  The cc values not
+     used in those instructions are uses for microcode jumps, calls, and returns.
+     (Microcode calls and returns will be implemented when/if I need them.)
+
+     That control-flow micro instruction also handles exceptions.  Exceptions
+     are indicated by having the high-bit of the target micro address set.
+
+     Register/immediate/datalen/condition-code fields in microcode instructions
+     can be "templated".  That means the decoder fills in the value for those
+     fields.
+
+ */
+
+/* FIXME  -- may have to make some changes regarding SHL/ROL.
+
+   The shifter/rotater can best be thought of as a single 64->32 barrel
+   shifter.
+
+   Should we give it 64 bits in the bit field instructions?  Should we then
+   just give it a single register + a len of 64 and have it figure out on its
+   own that it should <Rn+1> <Rn> concatenated?
+ */
+
+
+/* Looks at some bytes, tells us how many bytes were looked at, tells us which
+   operand flow to use, decodes <imm>, <Rn>, <Rx>, <datalen>.
+
+   Also detects some combinations as illegal -- or should that be done by the
+   operand flow?
+
+   Input: r15 (PC), fetch buffer, #bytes in fetch buffer.
+
+   Return value:
+     0:  very confused, couldn't decode anything, possibly because there were
+         too few bytes in the fetch buffer.
+     1-9 number of bytes consumed.
+
+   vars:     decoded fields, the decoder sets at least one of <imm>, <Rn>, <Rx>
+             and it may set all of them
+             It expects <datalen> to be filled in already.
+
+   addrmode: bitfield with decode info.  This will be fed into a table/PLA to
+             decide the label to use.
+
+
+   addrmode:
+
+      6     5    4   3    0
+   +-----+-----+----+------+
+   | err | Idx | PC | type |
+   +-----+-----+----+------+
+      1     1     1    4
+     
+     type: basically the upper 4 bits of the spec (the second spec if idx=1).
+     idx is 1 for indexed addr modes (if the upper 4 bits of the first spec=4).
+     PC is 1 if Rn = 15.
+     err is 1 the addr mode is illegal -- this checks for all the illegal Rn/Rx
+     combinations as well.
+
+
+   This decoder does not look at the operand description (type × len).  This
+   step has already been done, in order to set <datalen> in vars.
+
+   The check for compatibility between the spec and the operand description has
+   to happen somewhere (so we don't write to immediate values, for example).
+
+   FIXME figure out where to make that check.
+   
+   FIXME drop err bit in addrmode and use a return value of 0?  Or -1?
+         drop addrmode and pass in datalen and return 6-bit addrmode instead?
+         And then look that up in a length array instead?  That would be a
+         4 × 64 entry array.  Hmmm... not nice, either.
+         Or return two values packed into the same value: addrmode and #bytes
+         consumed (lo byte and hi byte, for example).  0 bytes consumed would
+         then be an error.  The other byte could then indicate which one, if
+         that's necessary (I don't think it is).
+
+   Should we use the raw bits (32 values) or a compressed form (roughly 14 values)?
+   Actually, a compressed/decoded form is probably best.
+
+   Always pass in a buffer of 9 bytes -- which may not be all be valid.
+   The 9 byte size is only for quad immediates.  The maximum operand length
+   for other datalen's is only 6 bytes.
+
+   Is the 'pc' value even necessasry?  I don't think it is... unless, of course,
+   we are talking about address operands.  Are address operands allowed to be
+   PC relative or immediate values?
+
+   FIXME pc is not passed in!
+ */
+
+
+/* look at up to 9 bytes
+
+   pc:      only so we can pass it on to decode_spec() + so we can do branches.
+
+   buf:     9 bytes we can look at.  Some of them may not be valid
+
+   descr:   a string consisting of at least 2 ASCII chars.  Only looks at those
+            first 2 chars.  The first is the access type (R/W/M/A/V/B), the
+            second the data type, which also provides the length (B/W/L/Q).
+
+
+   vars:    values to merge into µop templates.  Some values may already be
+            set (<cc>).
+
+   return value: how many bytes did we look at?
+            or: 0 if there was an operand error.
+
+
+   Immediate operands can be 'W' or 'M' (because you can't write to them).
+
+   FIXME: should branches be done here?  Yes.  But they won't lead to calls
+   to decode_spec().
+
+   FIXME: immediates don't need the PC value, just the bytes in buf[].
+          PC relative addresses may or may not need the PC value.  It depends
+          on how I choose to implement them: a flow that loads an immediate into
+          a register and then adds it to r15 and then jumps to the resulting
+          address (or loads from/stores to the address or moves the address to
+          a register or pushes it to the stack) -- or a flow that loads an
+          immediate corresponding to PC + displacement into a register.
+          
+          The former system is more flexible, more table-driven, simpler C
+          code.  It also generates slightly longer µpre-sequences.
+          
+          I'll go for the former system, then.
+
+   FIXME  the loop that calls decode_operand() needs to know which operand we
+          are at AND which o1..o6 register(s) to use.  In case of quads being
+          read, we use two registers.  How does the loop know that?  Since it
+          only happens for "rq", it should be fine to special case it inside
+          the loop.
+          It is the loop code that decodes b/w/l/q to 1/2/4/8, anyway.
+
+          dst, dst2 need a similar handling.  	There are a few instructions
+          that produce two results or a quad result.  Thankfully, no instructions
+          do both (because floating-point is emulated).
+
+ */
+
+
+/* 
+   Exceptions:
+     INTO, DIV0
+
+   Neither is actually raised by alu().  They are just reported and may or may
+   not lead to an actual exception.  In both cases, the result actually gets
+   written to reg/mem, i.e., the µpost flow actually runs.
+
+   Perhaps the best way to handle this is to have yet another bitfield somewhere,
+   that indicates the requested exceptions?
+
+   I first thought that returning an exception indication or passing a reference
+   to a bitmask into alu() would be good ideas.  I now think it's better to
+   add a field to struct cpu.
+ */
+
+
+/* start by looking at interrupt rq and trace flag.
+
+   fetch instruction
+   decode-opcode, figure out stuff
+   decode-operand, fetch basic block, run it, fetch new basic block if branch/exception, ...
+   decode next operand until we are done (or we get an exception)
+   write result(s) (if we didn't get an exception)
+   
+   did we request an exception?  I think this is for faults only -- INTO, DIV0
+
+   Do we do the stack stuff and jmp to the exception vector here or do we wait
+   until the next time we get called?
+ */
+
+
+# Read µcode from stdin, write C include files with tables to stdout.
+#
+# The microcode format is deliberately simple and does not at all save on bits.
+# Later versions can figure out how to use fewer bits.  Later versions can also
+# optimize the output code better -- but they are still expected to use the
+# exact same source code.
+#
+# Perl is chosen because it's easy to parse simple text files and to write
+# text files with Perl.  There's not expected to be any algorithmic code here
+# at first and only a little later, when we start optimizing the µcode a bit.
+#
+#
+#
+# µcode format
+# ---
+# Looks a lot like a simple RISC assembly language.  It's a 3-address load/store
+# machine with a special µop for immediates.  That instruction is the only way
+# to handle immediates.
+#
+# There is no pass visibility in the µassembler and *definitely* no macros.
+# Expressions can only be register names, special register requests, immediates
+# (only for µIMM instruction), labels (only for jump/branch instructions).
+#
+# Each macro instruction is expected to be represented by a label.  The address
+# modes are also each represented by a label.  So are a few other, internal
+# things like reset, exceptions, TLB miss, etc.
+# Instruction labels are just the instruction name.  Other labels begin with '-'.
+# Internal µbranches are possible, to any kind of label.
+# Exception handling is implemented as a µbranch with a special bit set in the
+# µtarget value.  Two mnemonics are used for the instruction, 'bcc' for normal
+# branches and 'exc' for exceptions.  They take a condition code which is either
+# one of the lower 4 bits of the 12 Bcc macro instructions or it has one of 4
+# special values: unconditional branch, call, ret, and the <cc> template value.
+# The <cc> template value means "take the lower 4 bits of the macro instruction
+# and insert them into the cc field of the bcc µinstruction".
+#
+#
+# Non-instruction labels are allowed to contain non-alphanumeric characters
+# like '-', '[', ']'.
+#
+# Local labels for loops, conditions.  They begin with @ and are only valid
+# between non-local labels.
+#
+# Each flow ends with a '---' line.
+# There can be more than one label for a flow.
+# 
+# Line comments begin with '#'.
+#
+# Similar flows are not merged in the first version.  That may come at a later
+# time.
+#
+# Operands can be a fixed register name or -- for address mode handling -- a
+# special "register name" that tells the operand decoder to put a register
+# number from the operand into the µinstruction.
+#
+# Immediate operands can be literals (hex only) or -- for address mode handling
+# -- a special "immediate" that tells the operand decoder to put an immediate
+# value from the operand into the µinstruction.
+#
+# Special operands: <opreg>, <imm>, <Rn>, <Rx>, <cc>.
+#
+# Many µinstructions have a field with their data length.  This field either
+# specifies a concrete length or it's a template value that gets replaced
+# with the operand's data length.
+#
+# All fields must be concrete outside the decoder.
+#
+#
+#
+# Kinds of µcode flow
+# ---
+# µpre/µpost  - operand parsing flows (might be just a single µinstr).
+#
+# µcore       - core operation flow (might be just a single µinstr).
+#
+# µspecial    - reset, machine check, exceptions, emulation, TLB misses, ...
+#
+# µcommon     - code reused by seveal flows of whatever type.  Bcc instructions,
+# for example, are implemented as a single Bcc µinstr shared by all Bcc macro
+# instructions, which conditionally jumps to a JMP µinstr which performs the
+# macro branch.
+#
+# Some of the µinstructions are taken verbatim from the tables.  Some take
+# one or more parameters from an operand specification, from the macro instruction
+# (Bcc takes the cc field from the lower 4 bits of the macro instruction), or
+# from the tables used by the instruction parser (data length, flag-mode).
+#
+# Normal execution consists of:
+#  *) trace, interrupts, maybe exceptions
+#  F) instruction fetch
+#  D) instruction decode, which mainly consists of table lookups
+#  O) parsing of operands/generation of µops, one operand at a time
+#  C) generation of µops specific for the macro instruction (this is the core
+#     of the macro instruction and includes flag setting)
+#  W) parsing of last operand(s)/generation of µops, in order to do writeback.
+#
+#
+# A few instructions write more than one result.  EDIV writes two long words.
+# EMODF, EMODD, EMODG also write two results but since they are emulated we
+# don't care.
+#
+# All other instructions only write to a single destination (or don't write at
+# all).  On the other hand, some destinations are actually quads, i.e., they
+# write to two registers but as a single value.
+#
+# This can probably be best handled by having dst, dst2.  EDIV generating two
+# results is easy on the model -- but would also be easy on a realistic machine,
+# with an extra µop to move one of the results from an internal register to dst2.
+#
+# Quad operands are loaded into two o1..o6 registers.  They are stored from two
+# registers (dst, dst2).
+# In order to make the model easy, ld/st can automatically use two consecutive
+# registers when len = 64 bits.  A realistic machine would use two µops.
+#
+# Double-registers are not allowed to "wrap-around", i.e. they can't begin with
+# r15.  Doubling of internal registers, say r21'r22 is fine.
+#
+# Communication between D, C, and W:
+#   O leaves operands in o1..o6.  Operands can be values or addresses (for MOVA,
+#   PUSHA + writes that go to memory).
+#
+#   C takes operands from o1..o6 -- it knows precisely how many operands it has
+#   and of what kind.  It leaves results in dst (and possibly dst2).
+#   It is the only part that is allowed to change the flags.  
+#
+#   W writes the result from dst/dst2 back.  It may be written to a register
+#   (with a µmov) or to a precomputed address (left in one of the o1..o6
+#   registers by O.  Since it is generated by the decoder, it knows which o
+#   register to use.
+#
+#
+# Some complex instructions make further memory reads or writes than those done
+# by O and W.
+#
+# Write operands always go last.  They may be pure write operands or modify
+# operands.
+#
+# Some modify instructions (ADAWI) use interlocked read and modify.
+# Some complex instructions (INSQHI, INSQTI, REMQHI, REMQTI, BBSSI, BBCCI) must
+# also use interlocks.
+#
+# The queue instructions use LDI/STI in their µcore flow.
+# ADAWI uses LDI/STI in O and W.
+# BBSSI/BBCCI use LDI in O and W (I think).
+#
+# There are so few of these instructions that they are special cased by the
+# decoder (setting a bit in D, passing that bit to O that looks at it during
+# the second operand, and to W).
+#
+# FIXME -- these details may not be entirely correct.
+# FIXME -- favour a table that says which operands to use LDI for + whether to
+#          use STI in W.
+#
+#
+#
+# Quads
+# ---
+# The VAX is a 32-bit CPU with only a handful of instructions that operate on
+# 64 bits (quad words): ASHQ, CLRQ, MOVQ, MOVAQ, PUSHAQ.
+#
+# The latter two don't /actually/ operate on 64-bit values.  They just use a
+# datalen of 64 bits/8 bytes during operand processing, which matters for
+# index, autoinc, autodec address modes.
+#
+# The shift/rotate instructions implicitly use 64-bit values, as do the
+# bitfield instructions.
+#
+# Load/store of quads use double registers, i.e. they load/store 64 bits in
+# one µops.  This makes the model simpler.  A realistic machine would of course
+# not do that.
+#
+#
+#
+# Operand flows
+# ---
+# opspecs
+# Normal ops use a single o1..o6 register.  Quad sources use two.  Quad addresses
+# are like all other addresses and use only a single register.
+#
+#
+# branches 'b' use no operand specifier byte.  They read an 8-bit or 16-bit
+# displacement byte from the instruction stream.  It gets sign extended and
+# placed in an o register.
+#
+# CALLS/CALLG, JMP use a normal operand with the 'a' mode and 'b' data length.
+# CASE use normal operands followed by a list of nn-bit displacements (?)
+# Those displacements are read by µop from the C phase.
+#
+# When writing back a result (if the last op is write/modify), then most (all?) types
+# produce a single µop (mov   dst, Rn | st   dst, [on]).  If it's a quad, it
+# will *still* produce only one µop for the model:
+#   mov   dst, Rn      -- 64, uses double-registers
+# or
+#   st    dst, [on]    -- 64, uses double-registers
+#
+# ld/st already have to handle 64 bits in the model.
+# We do the same thing with mov.
+#
+#
+#
+# Traps, commits, and aborts
+# ---
+# autoinc/dec
+# TLB miss
+# INTO
+# interrupts
+# illegal operation
+# illegal operand
+# emulation
+# invalid memory
+# xxx memory
+# M-bit
+# privilege exception
+#
+# first part done.
+# string instructions.
+#
+# register changes
+# flags
+#
+# commit/rollback -- automatic commit at the end of the last µinstr for a macro
+# instruction.  Rollback with 'rollback' µinstruction.
+# 'rollback' instruction only used inside special flows.
+#
+# Only covers registers r0..r15.  Only needs to cover autoinc/dec changes for
+# r14..r15 -- the µcode is guaranteed not to change GPRs or flags or PSL or
+# processor registers in a way that requires more than that.
+# r15 gets changed by the decoder and is special + it gets changed by the
+# decoder, not by the µflow.  The decoder saves a copy which is used by 'rollback'
+# to rollback.
+# Some instructions should use the backup PC in exception stack frames, others
+# should use the next/current PC.  It is probably not necessary to have two
+# different rollback instructions: we can save r15 before or after the 'rollback'
+# instruction.
+# 
+#
+# The string instructions can read/write their operands using autoinc/dec and
+# then work on memory inside a flow in the C phase.  In case of a trap here,
+# we do NOT want to roll back the autoinc/dec changes.  Therefore, we also need
+# 'commit' µinstr.  The 'commit' µinstruction should not commit r15 -- we need
+# to save the address of the string instruction so we can resume execution of
+# that.
+#
+#
+#
+# Templates
+# ---
+# All the microcode is fetched from ROM.  There is no microcode that gets
+# generated by the decoder, at least not in the architectural model.  It is
+# expected that some versions will have a smart decoder that recognizes
+# instructions with simple operands and synthesizes µops for those, though.
+#
+# µops in ROM can be fed directly into the data path or template variables in
+# certain µops can be replaced with values coming from the decoder.
+#
+# template values in µpre/µpost:
+#   <imm>  <datalen>  <Rn>  <Rx> <opreg> <dst>
+#
+# template values in µcore:
+#   <cc>
+#
+# template values in µspecial (boot + exception/interrupt + shared):
+#   none
+#
+#
+#
+# Registers
+# ---
+#   0..15	r0..r15
+#  16..22	p1..p7   ; all referenced by the same <pre> template value
+#  23..25	e1..e3   ; all referenced by the same <exe> template value
+#  26..27	t0..t1
+#  28		psl
+#
+#  40		<Rn>
+#  41		<Rx>
+#  42		<opreg>	 ; current operand src register (one of o1..o6)
+#                        ; can also be the address of a write operand
+#                        ; can be a double register
+#  43           <dst>    ; can be a double register
+#
+# <Rn>, <Rx>, <pre>, <exe> are only used (and allowed) in µpre/µpost.
+#
+# Don't need to refer to p1..p7, e1..e3 in the stored µcode.
+#
+# References to <pre>, <exe>, <reg> increment internal counters in the decoder
+# The decoder checks register references in the order src1, src2, dst.
+# This ROM µinstr:
+#
+#    sub   <pre>,<pre>,<dst>
+#
+# will expand to:
+#
+#    sub   p1, p2, e1
+#
+# Immediate values are put into a 64-bit internal regiser in the decoder and
+# doled out in 32-bit pieces every time <imm> is encountered (only in imm µop).
+#
+# A 64-bit immediate read operand is implemented with the (ROM) fragment:
+#
+#   -imm2:
+#	imm	<imm>, <pre>	-- 32
+#	imm	<imm>, <pre>	-- 32
+#	---
+#
+# Which translates to the (pipeline) fragment:
+#
+#	imm	lower-32-bits, p_n	-- 32
+#	imm	upper-32-bits, p_n+1	-- 32
+#
+#
+#
+# Processor registers
+# ---
+#    0		KSP		kernel SP
+#    1		ESP		executive SP
+#    2		SSP		supervisor SP
+#    3		USP		user SP
+#    4		ISP		interrupt SP
+#
+#    8		P0BR		P0 base
+#    9		P0LR		P0 length
+#   10		P1BR		P1 base
+#   11		P1LR		P1 length
+#   12		SBR		S base
+#   13		SLR		S length
+#
+#   16		PCBB		PCB base
+#   17		SCBB		SCB base
+#
+#   18          IPL
+#   19          ASTLVL
+#
+#   20          SIRR
+#   21          SISR
+#
+#   56		MAPEN 		enable va->pa mapping
+#   57		TBIA		invalidate all va->pa mappings
+#   58		TBIS		invalidate a single va->pa mapping
+#
+#   62          SID             CPU type
+#   63          TBCHK           check if va is mapped
+#
+#
+# formats:
+#   op			- nop|stop|commit|rollback|emul|ediv
+#   op|s1		- jmp
+#   op|imm|dst		- imm
+#   op|imm|s1		- mbz
+#   op|cc|µtarget	- bcc|exc
+#   op|s1|   dst        - mfpr|mtpr
+#   op|s1|s2|dst|len	- add|add_nc|sub|mul|div|and_nc|bic|bis|xor_nc|shl|rol_nc|mov
+#   op|s1|s2|    len	- st|sti|cmp
+#   op|s1|   dst|len	- ld|ldi|zeroext|signext|[]|mcom|mneg|movz
+#   op|reg|      len	- ++|--
+#
+#
+# struct uop {
+#   int		op;
+#   uint32_t	imm;
+#   int		s1, s2, dst;
+#   uint16_t	utarget;
+#   int         cc;
+#   int		flags;	/* 0=arch, 1=µ */
+#   int		len;
+#   _Bool	last;
+#   int		flow; /* for internal error testing in sim.c */
+# }
+#
+#
+# data lengths:
+#   0	8
+#   1	16
+#   2	32
+#   3   64
+#
+#   4	<datalen>
+#
+#
+# cc (in µbcc):
+#   0  (BSBB)						ret*
+#   1  (BRB)						<cc>*
+#   2   NEQ   !=			!Z		ZC
+#   3   EQL   =				 Z		ZS
+#   4	GTR   >   signed		!(N | Z)
+#   5	LEQ   <=  signed		 (N | Z)
+#   6  (JSB)						call*
+#   7  (JMP)						always*
+#   8	GEQ   >=  signed		!N		NC
+#   9	LSS   <   signed		 N		NS
+#  10   GTRU  >   unsigned		!(C | Z)
+#  11	LEQU  <=  unsigned		 (C | Z)
+#  12	      -- overflow clear		!V		VC
+#  13	      -- overflow set		 V		VS
+#  14   GEQU  >=  unsigned		!C		CC
+#  15	LSSU  <   unsigned		 C		CS
+#
+#  *: values that do not occur in Bcc macro instructions.  Unconditional
+#     branches/exceptions are implemented as µbcc w/ cc=7.  The <cc> template
+#     value is implemented as cc = 1.  µCall/ret are implemented as µbcc with
+#     cc=6 and cc=7, respectively.
+#
+#     BSBB = Branch to Subroutine with Byte displacement
+#     BRB  = Branch with Byte displacement
+#     JSB  = Jump to Subroutine
+#     JMP  = Jump
+#
+#
+# µinstructions
+# ---
+#
+# No µop may use r15 as a destination or modify register.
+# The only way to modify r15 is to use µjmp.
+#
+# It is perfectly acceptable to read r15, but not as the first part of a
+# double register.
+#
+# Writes to registers are always 32 bits.  If the datum written is smaller, it
+# gets sign-extended to 32 bits.  µmov looks like it does a partial write of
+# the destination register -- but really the destination is the second source
+# register and the instruction really performs a merge of bits from the two
+# source registers.
+#
+# ld/st		load/store double registers when len = 64.  They always read/
+#               write the exact number of bits asked for.
+#
+# mov           reads 2 32-bit values and writes a single 32-bit value when
+#               len = 8/16/32.  When it is 64, it moves from one double register
+#               to another.  This makes the model simpler.
+#
+# emul          produces a 64-bit result which gets written to a double register.
+#               This makes the model simpler.
+#
+# ediv          produces two 32-bit results which get written to two consecutive
+#               registers.
+#
+# mov/mneg/mcom/movz are all implemented as µops even though only about half are
+# necessary.  It took to long to figure out how to get rid of some of them.
+#
+# All µops that change the flags do their own flag manipulation (using the
+# correct set of flags).  If they write to the architected flags, setting the
+# V flag causes an exception if PSL<5> is set.
+# mov may write to PSL which causes an exception if both the V bit and bit 5
+# are set.
+#
+# A len of 64 is invalid for some µops:  all normal ALU ops, mneg/mcom/movz, 
+# zeroext/signext.
+#
+# Some instructions have an implied length of 32 (imm, mfpr/mtpr, mbz) or a length
+# doesn't make sense (emul/ediv, nop, stop, commit, rollback, jmp, bcc/exc).
+#
+# adc and sbb always read the C flag from the flag set indicated in the instruction.
+#
+#
+# ; immediates
+# imm   immval, dst		; always 32
+#
+#
+# ; standard ALU operations
+# ;
+# ; add|sub|mul|div  bic|bis|xor_nc  shl|rol_nc
+# ; adc|sbb
+# ; add_nc
+# ; and_nc
+# ; cmp
+# <alu>	s1, s2, dst       -- len flags
+# cmp   s1, s2            -- len flags
+#
+#
+# ; special ALU operations
+# emul                    -- flags ; always reads from o1, o2, o3, writes to dst/dst2
+# ediv                    -- flags ; always reads from o1, o2/o3, o4, writes to dst, dst2
+#
+# 
+# ; move (merge)
+# mov   src, src', dst          -- len flags  ; merge src/src' or use double
+#                                             ; registers (src, dst)
+#
+#
+# ; mcom/mneg/movz -- they get a µop each primarily for the flag handling
+# ;         FIXME movz macro instr takes *two* lengths (src, dst)
+# mcom  src, dst          -- len flags
+# mneg  src, dst          -- len flags
+# movz  src, dst          -- len flags ; use s2 bits for the other length?
+#
+#
+# ; load/store -- can cause exceptions (by branching to -memerr)
+# ld    [s1], dst         -- len
+# ldi   [s1], dst         -- len	; interlocked
+# ldu   [s1], dst         -- len	; untranslated address
+# st    s1, [s2]          -- len
+# sti   s1, [s2]          -- len	; interlocked
+# stu   s1, [s2]          -- len	; untranslated address
+#
+#
+# ; processor registers
+# mfpr	pr, dst			; always 32
+# mtpr	s1, pr			; always 32 -- may have side effects
+#
+#
+# ; operand handling
+# zeroext	src, dst -- len ; len -> 32
+# signext	src, dst -- len ; len -> 32
+#
+#
+# ; operand handling
+# ++	reg      -- len	; modifies reg, logs change, r15 illegal
+# --	reg      -- len	; modifies reg, logs change, r15 illegal
+# []	src, dst -- len	; shifts src depending on <len>, dst = r15
+#
+#
+#
+# ; conditional branch (actually includes unconditional branch + call/ret)
+# bcc	cc, µtarget  -- flags   ; bcc/exc are the same µinstr with different
+# exc	cc, µtarget  -- flags	; value of a bit in µtarget.
+#
+#
+# ; exception generation (really just special conditional branch)
+# mbz	mask, src		; always 32, can branch to -mbz µlabel
+#
+#
+# ; unconditional macro branch
+# jmp	target-reg
+#
+#
+# ; transactions (r0..r14, not r15 or the flags? FIXME)
+# commit
+# rollback
+#
+#
+# ; misc
+# nop
+# stop				; stop the simulation
+#
+#
+#
+# µOp details (flags, 32-bits)
+# ---
+# All µops that write to registers perform full 32-bit writes.  Some write to
+# two registers.
+#
+# Most µops that take length parameters sign extend their len-bit value to
+# 32-bits before writing it to the destination register.  The only ones that
+# don't do zero extension (zeroextend, movz) or pretend to do partial writes
+# (mov).
+#
+# 'mov' performs a partial write by actually having two sources, src and dst',
+# and merging them into a 32-bit value depending on the len-parameter.
+#
+# 'zeroext' naturally zero extends to 32-bits.
+#
+# Most µops that change the flags change all of them.  A few don't change the
+# C flag because some of the macro instructions don't.
+#
+#
+# ld/ldi   [src], dst   -- len
+#    dst := signext(mem.len[src])
+#    doesn't set flags
+#
+# st/sti   s1, [s2]     -- len
+#    mem.len[s2] = trunc.len(s1)
+#    doesn't set flags
+#
+# add      s1, s2, dst  -- len flags
+#    val := s1 + s2
+#    dst := signext(val)
+#
+#    N := MSB(val)
+#    Z := val == 0
+#    V := 
+#    C := alu.c
+#
+#
+# add_nc   s1, s2, dst  -- len flags
+#    val := s1 + s2
+#    dst := signext(val)
+#
+#    N := MSB(val)
+#    Z := val == 0
+#    V :=
+#    C -- unchanged
+#
+#
+# adc      s1, s2, dst  -- len flags
+#    val := s1 + s2 + C
+#    dst := signext(val)
+#
+#    N := MSB(val)
+#    Z := val == 0
+#    V :=
+#    C := alu.c
+#
+#
+# sub   -- operand order ?
+# sbb   -- operand order ?
+# div   -- operand order ?
+# mul
+#
+# cmp	-- operand order ?
+#
+# bic     s1, s2, dst   -- len flags
+#    val := s1 & ~dst
+#    dst
+# bis     s1, s2, dst   -- len flags
+# and_nc  s1, s2, dst   -- len flags
+# xor_nc  s1, s2, dst   -- len flags
+#
+# shl
+# rol_nc
+#
+#
+# mov	src, src', dst	-- len
+#    8:  src'<31:8> . src<7:0>    => dst
+#   16:  src'<31:16>. src<15:0>   => dst
+#   32:               src<31:0>   => dst
+#   64:  src+1 . src              => dst+1 . dst
+#
+# mcom
+# 
+#
+# Some µops that change flags leave the C flag alone.  They have all been
+# explicitly named accordingly.
+#
+# EDIV, EMUL macro instructions probably require corresponding µops.
+#
+#
+#
+# Flags and branching, both macro and micro
+# ---
+# There are two sets of NVZC flags, one architectural (that can also be read/
+# written as PSL) and one for the µcode (which can't be read/written explicitly).
+#
+# The flag updating instructions have a field that selects which flag set they
+# use.  They can't choose not to set the flags -- but they can choose to set
+# the µ flags if the architectural flags should be unaffected.
+#
+# The flag setting is often dependent on the operand length in bits.
+#
+# All µops that change the flags do so in a "natural" manner in a single way
+# per µop.
+#
+# There is a case where we need an addition that sets the architectural flags
+# differently than the normal addition does.  We have an extra µop for that
+# (add_nc, does not change the carry flag).
+#
+# Both macro and micro branching uses a single µop that branches to µcode
+# depending on the flags and a flag selector bit in the µop.
+#
+# This branch µop also handles exceptions, but in that case there is a special
+# bit set in the µtarget.
+#
+#
+#
+# "Interrupt" on overflow
+# ---
+# Almost all the arithmetic instructions can fault on overflow if the
+# integer overflow trap enable bit has been set in PSL (bit 5).  The µops do
+# this automatically if PSL<5> is set AND they set the V flag AND they use
+# the architectural flags.  Setting V in the µ-flags does not generate any
+# exceptions.
+#
+#
+#
+# MBZ
+# ---
+# Easy check of MBZ fields in PTEs, PCBs, processor registers.
+# Causes exception by branching to -mbz.
+#
+#
+#
+# Exception labels
+# ---
+# Instruction labels never have a prefix ('-', '@').  All other labels begin
+# with '-', whether they are exceptions or not.
+#
+# -mbz
+# -into
+# -memerr
+#
+# uasm writes #define's for these labels.
+#
+# FIXME -- more labels needed!
+#
+#
+#
+# PSL and flags
+# ---
+# PSL is mostly a normal 32-bit register.  The 4 flags, however, need to live
+# after the ALU, that is to say, in another pipe stage.  That is not visible
+# to the µcode, however.  Stalls will be inserted if necessary.
+#
+# The µ-flags live in the same place as the arch-flags and the rest of PSL.
+#
+#
+#
+# Interlocked memory access
+# ---
+# ldi/sti pairs.  No intervening ld/st allowed.  If one is seen then the
+# interlock is automatically cleared.
+#
+# The spec contains wording about interlocked access always being referenced.
+# This sounds like caching is disallowed for them.  I think it is intended to
+# mean that they always hit the "interprocessor-visible memory subsystem",
+# whether that is physical memory or caches participating in a coherency
+# protocol (MSI/MESI/MOSI/MOESI/...).
+#
+#
+# Translate into mem_rm() "read w/ modify intent" and mem_wu() "write unlock".
+#
+# On a Z80 or 8086-like bus they would be two normal cycles where busreq would
+# be denied until after the write cycle.
+#
+# On Unibus, they would be translated to DATIP, DATO(B) instead of DATI, DATO(B)
+# On Q-bus, they would be translated to DATIO(B) instead of just DATI, DATO(B).
+#
+# PCI (conventional) has a special LOCK# signal that can lock out other devices
+# while doing one or more bus transactions (such as memory read/write).
+#
+#
+#
+# Pipeline stalls
+# ---
+# The pipeline is not ever supposed to be exposed.
+# This makes the µcode easy to write.  It also makes a really simple simulator
+# very easy to write (it doesn't have to simulate a pipeline and the decoder
+# and datapath can be completely seperate).  It is not hard to build a simple
+# 5-stage pipeline with interlocks that keeps the pipeline unexposed.
+#
+# Register-register stalls are inserted automatically (write -> read).
+# Load stalls are inserted automatically (load -> use)
+# Wait stalls (waiting for cache or memory) are inserted automatically.
+# Flag setting + Bcc cause a stall.
+# Shl + flag setting causes a stall.
+#
+# Moving to a processor register sometimes has side effects or effects on
+# following µinstructions or instruction fetch.  In that case the pipeline
+# may stall or be flushed.  This happens in case of writes to MAPEN, PnBR,
+# PnLEN, SBR, SLEN + the TLB invalidate registers.
+#
+# REI is the only instruction documented to flush the instruction prefetch
+# queue so the only architected way of handling self-modifying code (and code
+# loading from devices!) is to execute that instruction.
+# This is implemented as a processor register where writes lead to a flush.
+#
+#
+#
+# Flushes and stalls
+# ---
+# pipeline bubble -- µNOPs.  Some potential implementations can generate
+#                    bubbles inside the pipeline if part of it stalls and the
+#                    rest doesn't.
+# pipeline stall  -- stall the entire pipeline while we are waiting for
+#                    cache/memory.
+# pipeline flush  -- for µbranches and some processor register writes.
+# prefetch flush  -- REI side effect.  Also flushes the pipeline.
+#
+# Bubbles do not have to be implemented.  It is probably easier to only implement
+# stalls.
+#
+# The simple simulator doesn't implement any of this, of course.
+#
+#
+#
+# Warnings/constraints
+# ---
+# Warn if there is fall through past a label.
+# Two labels in a row are fine, except if they are not adjacent.
+#
+#
+#
+# Summary and Stats
+# ---
+# Outputs statistics about the µcode in a big comment at the end of the output.
+#
+# Tables/histograms of lengths of the µcode streams.  Tables/histograms of
+# how much the streams are shared between instructions (labels, really).
+# Map of the microcode with a symbol for each µinstr that says what it's part
+# of: exceptions, tlb miss, reset, operand handling, emulation, or which
+# instruction group it is.
+#
+# Probably also how the register operands are used in 3-operand µinstrs, in
+# LD/ST, in IMM.
+#
+#
+#
+# Output code
+# ---
+# /* This tells the C code how big a uop[] it needs. */
+# #define MAXFLOWLEN     nn
+#
+# /* exception marking bit */
+# #define U_EXC_MASK     0x....
+#
+# /* all the special labels */
+# #define LBL_MBZ	 nn	/* µaddr for -mbz label    */
+# #define LBL_INTO	 nn	/* µaddr for -into label   */
+# #define LBL_MEMERR	 nn	/* µaddr for -member label */
+# ...
+#
+# /* uops */
+# #define U_NOP          nn
+# #define U_ADD          nn
+# ...
+#
+# /* uop template fields */
+# #define U_IMM_IMM    1234
+#
+# #define U_CC_CC         1
+#
+# #define U_CC_ALWAYS     7
+# #define U_CC_CALL       6
+# #define U_CC_RET        0
+#
+# #define U_CC_NEQ        2	/* !Z */
+# #define U_CC_EQL        3	/*  Z */
+# #define U_CC_GTR        4	/* !(N | Z) */
+# #define U_CC_LEQ        5	/*  (N | Z) */
+# #define U_CC_GEQ        8	/* !N */
+# #define U_CC_LSS        9	/*  N */
+# #define U_CC_GTRU      10	/* !(C | Z) */
+# #define U_CC_LEQU      11	/*  (C | Z) */
+# #define U_CC_VC        12	/* !V */
+# #define U_CC_VS        13	/*  V */
+# #define U_CC_GEQU      14	/* !C */
+# #define U_CC_LSSU      15	/*  C */
+#
+#
+# #define U_LEN_DATALEN   4
+#
+# #define U_LEN_8         0
+# #define U_LEN16         1
+# #define U_LEN32         2
+# #define U_LEN64         3
+#
+#
+# #define U_R_Rn         29
+# #define U_R_Rx         30
+# #define U_R_OPREG      31
+
+# struct uop {
+#    ...
+# };
+#
+# struct uop   ucode[] = {
+#   { .op = nn,  .s1 = nn, ...},
+#   ...
+# };
+#
+# unsigned     ustart[512] = {
+# /* 00 */ nnn, nnn, nnn, nnn,      nnn, nnn, nnn, nnn,
+# ...
+# };
+
+
+Sammensplejsning af flows + branches + exceptions:
+- slut på et flow + decoder har ikke flere flows den vil starte => ny instruktion
+- exception får decoder til at glemme ekstra flows.  Når exception flow stopper =>
+  ny instruktion.
+
+  Nogle exceptions trigges af into (cc-arch), ld/st, mbz.  Andre implicit af bcc.
+  Hvis vi har en explicit "start exception" µop?  En exception udgave af bcc-µ?
+
+CVAX:
+- case i CVAX et al µcode bruges primært til operand parsing.  Bruges også til
+  Bcc.  Og til at skelne mellem processorregistre i MTPR/MFPR.
+  CASE bruges til betingede hop generelt, tror jeg.
+
+- call/ret i CVAX µcode bruges til µtraps (TLB miss, page crossing + nogle
+  andre interne) men mon ikke også de bruges i INDEX til at kalde MUL-koden?
+   
+  Jo.  Og grep viser at CALL[] bruges til meget, meget mere.  Bittælling i
+  CALLS/CALLG/RET, i implementationen af mul/div (for at implementere løkker),
+  LDPCTX for at spare plads, kombineret med en *pointer* til et register som
+  automatisk bliver talt op.  På den måde kan man genbruge den samme kode til
+  at loade mange registre sekventielt.  Tilsvarende med SVPCTX.
+  Det bliver brugt i kørutinerne.
+  Det bliver brugt til en masse meget tæt kobling med styringen af instruction
+  prefetch og instruction decode.
+
+  Jeg behøver ikke µcalls hvis der kun er ganske få steder der gerne vil bruge
+  subrutiner.  Jeg kan bruge et register til at sige hvor der skal branches
+  tilbage.
+
+- CVAX har en "MEM(VAP)" som automatisk tæller VAP op.  VAP = VA'.  Mener VAP
+  automatisk bliver sat når VA bliver brugt.
+
+  Bliver brugt til process control blocks, til exception frames, til køer,
+  CALL/RET.
+
+- CVAX har branch delay ved µjmps!  Og ved µtraps og µcalls og µrets?  Det
+  tror jeg.
+
+- CVAX 40ns µcycle, 2ns gate delay.  De 40ns er delt op i read, alu, write,
+  hvor write overlapper delvist med read.
+
+- Rigel 30ns µcycle, 1.5ns gate delay.  De 30ns er delt op i read, alu, write,
+  hvor alle overlapper (fuldt pipelined).  Dvs ca 10ns per stage, ca 7 gate
+  delays per stage.  Så skal de da have forbedret ALU'en enormt, for den tog
+  ca halvdelen af de 40ns µcycle i CVAX, dvs 20ns/10 gate delays.
+
+- Rigel, µbranches er dyre.  Flush/bobler i både E-box (ny) og I-box (også CVAX).
+
+- FFC/FFS implementeres ved mikrokode der først finder den rigtige byte og
+  derefter søger 2 bits ad gangen efter målbitten.  Bruger case til den sidste
+  del af søgningen.
+
+
+
+µcode:
+- flag setting er urealistisk som µop.  Bedre med cc-mode som arg til alu-logic
+  ops sammen med len.
+     no-change
+     set arch flags
+     set µ flags
+
+  add  p1, p2, e1  -- <datalen>, arch
+  add  p1, p2, e1  -- <datalen>, arch
+  add  p1, t0, p1   -- 32, µ
+  add  p1, t1, p2   -- 32
+
+  Faktisk kan jeg nok bare nøjes med µ/arch!
+
+- hvor mange formater har jeg?
+
+  imm | val | dst
+  mbz | val | src
+  ++  | reg | len
+  --  | reg | len
+  []  | s1  | dst | len
+  mfpr| s1  | dst
+  mtpr| s1  | dst
+  ld  | s1  | dst | len | flags
+  st  | s1  | dst | len | flags
+  mxx | s1  | dst | len | flags	# mneg/mcom
+  zerobw| s1| dst | flags
+  zerobl| s1| dst | flags
+  zerowl| s1| dst | flags
+  signbw| s1| dst | flags
+  signbl| s1| dst | flags
+  signwl| s1| dst | flags
+  alu | s1 | s2 | dst | len | flags  # inkluderer 'mov'
+  bcc | cc | µtarget        | flags
+  jmp | s1
+  emul				# hardwired p1/p2/p3 input, e1/e2 output
+  ediv				# hardwired p1/p2/p3/p4 input, e1/e2 output
+  nop
+  stop
+  commit
+  rollback
+
+  dvs de kan implementeres som:
+  
+   # virkeligt pæne µop-felter
+  op | s1 | dst | s2 |len | flags	; 5 + (5 + 5 + 5) + 2 + 1 = 23
+  op | s1 | dst |imm			; 5 + (5 + 5) + 32        = 47
+  op | cc | µtarget       | flags	; 5 + 4 + 10 + 1          = 20
+
+  eller:
+
+   # stadig ret pæne µop-felter
+  op | s1 | dst | s2 |len | flags	; 5 + (5 + 5 + 5) + 2 + 1 = 23
+  op | imm| dst |imm			; 5 + (5) + 5 + 27        = 42
+  op | cc | µtarget       | flags	; 5 + 4 + 10 + 1          = 20
+
+  eller:
+
+   # stadig ret pæne µop-felter, take II
+  op | s1 | dst | s2 |len | flags	; 5 + (5 + 5 + 5) + 2 + 1 = 23
+  op | imm| dst |imm			; 5 + (5) + 5 + 8         = 23 # 13 bit
+  op | imm 				; 5 + 19                  = 24 # 19 bit
+  op | cc | µtarget       | flags	; 5 + 4 + 10 + 1          = 20
+
+  eller:
+
+   # stadig ret pæne µop-felter, take III
+  op | s1 | dst | s2 |len | flags	; 5 + (5 + 5 + 5) + 2 + 1 = 23
+  op | imm| dst |imm			; 5 + (5) + 5 + 8         = 23 # 13 bit
+  op'| imm 				; 4 + 19                  = 23 # 19 bit
+  op | cc | µtarget       | flags	; 5 + 4 + 10 + 1          = 20
+
+
+  eller:
+
+   # stadig ret pæne µop-felter, take IV
+  op | s1 | dst | s2 |len | flags	; 5 + (5 + 5 + 5) + 2 + 1 = 23
+  op | imm| dst |imm			; 5 + (5) + 5 + 5         = 20 # 10 bit
+       imm 				; 22                      = 22 # 22 bit
+  op | cc | µtarget       | flags	; 5 + 4 + 10 + 1          = 20
+
+
+  (+ de alle har en stopbit -- som kunne komme fra en PLA i stedet)
+
+  på bitniveau kan de to sidste endda (imm + bcc/exc) kombineres så der kun er
+  eet immediatefelt.  Ved ikke om det vil gøre hardwaren marginalt simplere
+  eller ej.
+
+  Dvs 3 formater.  Ca 20 bits, undtagen for imm, som er alt for stor.  Men!
+  Heldigvis bliver store, vilkårlige immediates kun brugt af operationsdekoderen!
+  µops fra ROM har kun ganske få forskellige immediate-værdier og de fleste er
+  ret små.  Dvs man kan bruge en konstantgenerator (dvs en lille tabel).
+  Dvs vi behøver kun 23 bits i bredden til vores µcode ROM.
+
+  Vi kan formodentlig endda bruge tricks på et tidspunkt til at skære ned på
+  bitbredden i µcode ROM.  Fx, behøver alle være lige brede?  Kan vi lave
+  nogle tricks så nogle af dem bliver lidt kortere?  Og så kan pakke dem så
+  vi kan udnytte den sparede bredde?
+
+  Eller: behøver vi alle s1/s2/dst-kombinationer?  Kan vi ikke se hvilke
+  kombinationer der bliver brugt i µkoden (incl. template-værdier) og så bruge
+  en PLA?
+
+  Nok en god idé at lade uasm.pl lave en tabel over anvendte imm-værdier.
+  Nok en god idé at lade uasm.pl lave en tabel over anvendte bcc-targets (+ 
+  hvilke conditions).
+
+  Man kan fx lave et trick hvor instruktionerne kan ligge meget spredt ved at
+  have en lille PLA til at sige hvad der skal ske med µpc.  På den måde vil
+  man ret billigt kunne lave branch/call meget tit og dermed have en stor grad
+  af genbrug.
+
+  Et andet trick: µpc bredere end dekodede bits.  Dvs at nogle µinstr bliver
+  spejlet.  Lidt særskilt dekoderlogik hist og her hvis der er enkelte µinstr
+  der ikke ønskes duplikeret.  Det betyder at man nemt kan "sammensplejse" flere
+  flows der er meget ens.
+
+  Der er pt 41 forskellige µops, hvilket nemt kan komprimeres så det hele kan
+  være i et 5-bit op-felt.  Faktisk endda et 4-bit felt, for der er pt. kun
+  14 3-ops.  Alle øvrige kan bruge en af de to tilbageværende 4-bit værdier som
+  op og så supplere med bits fra andre felter (3-op er den bredeste µop i ROM).
+
+  Alt sammen ting der kan laves i µasm.pl som et peephole-trin :)
+
+- hvis vi kan aflæse datalen i µcore, så kan vi folde mere mikrokode sammen.
+  Ved ikke hvor meget det kommer til at give.
+
+- branch predictor skal ikke bare fetche den rette instruktion, den skal også
+  fetche den rette *mikro*-instruktion!
+
+- terminologi:
+  µpre
+  µcore
+  µpost
+  µspecial
+
+- fremtidige optimeringer:
+
+  imm-felter i µinstr
+  ld/st der kan generere adresser (lægge regval og imm sammen)
+  zeroext/signext indbygget i ld/st og mov -- kan så droppes som særskilte ops.
+  evt µcalls
+  ld/st der kan lave autoinc/dec?
+
+  dual execute af µops:
+    alu|mov  + alu|mov
+    alu|mov  + ld/st
+    alu|mov  + bcc
+    alu|mov  + jmp
+    ++/--/[] + ld/st  (men de er nok integreret i ld/st til den tid)
+
+  de to pipes behøver ikke være ens.  Der skal være en der kan lave ld/st, bcc,
+  jmp og misc instruktioner.  Den kan så også lave alu.  Pipe 2 behøver ikke
+  kunne andet end alu.  EMUL/EDIV er ikke talt med i alu-gruppen.
+
+  pas på med flag.  Hvis flagene ikke skal bruges til noget efter de to µops
+  er det nemt.  Hvis der er en intern afhængighed via flagene skal vi passe på,
+  måske lave en splitbubble i pipelinen.
+  Nok slet ikke dumt at have "valid" bits for flag.
+
+  dual issue af µops kan laves før dual decode.
+
+- fremtidige constraint checks
+  fx at to processorregistre ikke skrives/læses for tæt på hinanden.
+
+- markering af udefrakommende bitfelter i µops kræver slet ikke ekstra bits!
+  den store bruger af det er µpre/µpost.  Der ved vi at vi ikke skal bruge
+  de almindelige værdier af felterne (i hvert fald ikke mange af dem).
+
+  µcore bruger én templateværdi, <cc> for Bcc.  Og det er for et felt på 4
+  bits hvor der kun er defineret de 12 værdier fra makroinstruktionerne og 1
+  værdi mere for ubetinget µbranch.
+
+  µspecial bruger slet ikke templates.
+
+- Bcc har masser af plads til µtarget.  Derfor kan vi godt definere en bit der
+  siger "Nu er vi i en exception".  På den måde ved dekoderen at den skal tie
+  stille.
+
+
+
+
+
+ALU-operationer.  Længder.  Flag.
+
+Har ombestemt mig ang. resultlængder/signextension/delvise registerskrivninger.
+Fra nu af ligner µmaskinen makromaskinen mere, så alle registerskrivninger kan
+være delvise.  LD/ALU/MOV-familierne laver delvise skrivninger.  Ingen af dem
+laver signextension.  Ingen af dem laver zeroextension (bortset fra movz).
+
+Ikke helt klar på hvordan jeg bedst skærer ned på størrelse/kompleksitet af
+koden for alu-ops :/
+
+Det interagerer med INTO-håndtering.  Det viser sig at dele af VAX-håndbogen er
+misvisende:
+ o det er ikke et højt V-flag der giver exception
+ o det er ikke højt V-flag kombineret med IV-flag der giver exception
+ 
+så ville INTO nemlig være level-triggered.
+
+ o det er lav-høj overgangen af V-flaget hvis IV allerede er sat der trigger INTO.
+ o det er ikke alle instruktioner der skriver til V
+ o det er ikke alle V-skrivninger der checkes for den lav-høj overgang!
+   BISPSW kan sætte V-flaget -- og det giver IKKE INTO.
+   REI kan sætte V-flaget (og IV-flaget) -- og det giver ikke INTO
+   LDPCTX kan sætte V-flaget (og IV-flaget) -- og det giver ikke INTO
+   RET skriver til både V og IV -- og det kan ikke give INTO
+
+   MTPR kan ikke skrive til V/IV, kun IPL.
+   
+   Det er faktisk kun ALU-gruppen der kan give INTO, selv om også andre skriver
+   til V (og IV).
+ o INTO giver ikke exception med det samme!  Resultatet bliver pænt skrevet til
+   reg/mem, PSL bliver opdateret...
+   Først til sidst bliver INTO checket.  Og der er også andre betingelser der
+   bliver checket samtidig.  Og det er faktisk ret kompliceret hvad der bliver
+   checket og hvordan samtidige interrupt-/exception-kilder prioriteres.
+
+   Dvs at vi er nødt til at have et flag:  req_into.  Clear ved starten af
+   instruktion, sæt evt af ALU-gruppen, check efter instruktion.
+
+ o så har vi flagene.  De er allesammen "naturlige", dvs de er nemme at lave
+   i HW med en ALU.
+
+   De er ikke helt så nemme i software.  Men de fleste sætter N efter MSB af
+   resultatet og Z efter om resultatet er 0.  Det er fælles kode.  Der er også
+   en del system i V-sætningen.
+
+   Lad os starte med at tage en kopi af flagene før vores µop.
+   Lad os lave en switch på u.op, lad os regne naturligt med 32-bit ints (eller mere?),
+   lad os skrive resultatet med result(), lad result() beregne forslag til NZ?
+   
+   carry ved add, sub, adc, sbc?
+   
+   mul/div/emul/ediv håndteres med 64-bit int til mellemregninger.
+   
+   shl/rol håndteres med 64-bit unsigned int til mellemregninger.
+
+   NZ(res, len)  -- giver 0/4/8/C
+   
+   V_add(s1, s2, res, len) -- giver 0/2
+   V_sub(s1, s2, res, len) -- giver 0/2
+
+ o µMOV sætter flag.  µMOV må gerne skrive til PSL (som ligger i samme registerfil
+   som r0..r15).  Hvilke flagskrivninger vinder så?  Hvis µMOV bruger µ-flag?
+   Hvis µMOV bruger arch-flag?
+   
+   Vi skal kunne skrive til PSL, ellers kan vi ikke implementere VAX'en.  Derfor
+   skal µMOV til PSL ikke opdatere flag overhovedet.
+
+   Skal det kun være r0..14 som dst der sætter flag?  Pt bruger jeg MOV xx,yy -- arch
+   til at sætte registre, hvos dst er målregistret.  Jeg tror ikke nogen af
+   µMOV-instruktionerne med µ-flagene egentlig producerer flagværdier der senere
+   bliver brugt til noget nyttigt.
+
+ o ALU-gruppen opererer (næsten) ikke på 64-bitværdier.
+   ASHQ gør, som den eneste af *Q-instruktionerne.  EMUL og EDIV bruger også
+   64-bitværdier.  Shift/rotate bruger i forvejen 64-bit internt, så ASHQ er
+   ikke ekstra besværlig.
+
+   Dvs at alle øvrige µops i ALU-gruppen kan nøjes med at bruge 32-bit værdier
+   og bruge result()-funktionen.  Det gør tingene noget lettere.
+
+ o hvordan laver man en pæn rotate?
+   start med 64-bit (som en kopi af 2 32-bittal) og lav en shiftl.
+   Det forklarer også hvorfor VAX'en har både ASHL og ASHQ men kun ROTL :)
+
+
+
+
+Arkitektur
+---
+Simpel 32-bit maskine der minder lidt om en VAX.  Instruktioner kan have
+forskellige længder fra 1 til 16 bytes.  Der er ingen alignmentkrav (andet end
+byte-alignment).
+
+Der er 16 32-bit registre og 4 1-bit flag.
+
+En instruktion har max 2 32-bit inputs (+ flag) og max 1 32-bit output (+ flag).
+Inputs kan være registre, immediates eller memory.  Outputs kan være registre
+eller memory.  Memory kan være udpeget af register, immediate eller register +
+immediate.
+
+Der er ingen auto inc/dec.
+
+Selvmodificerende kode kan lade sig gøre hvis man passer på.  Ellers ikke.
+
+Kan implementeres med en simpel RISC-agtig pipeline.  Decoder forrest sender
+RISC-agtige instruktioner (µops) ned igennem pipeline enten fra direkte afkodning
+af simple instruktioner eller fra en mikrokode-ROM.   Der sendes en µop afsted
+per cycle.  Internt er der 32 32-bit registre -- man kunne nøjes med færre
+ekstraregistre, men 32 er et pænt rundt tal.
+
+
+
+Instruktioner
+---
+ADD/ADC/SUB/SBB/MUL/DIV/SHL/SHR/ROL/ROR i -2/-3-udgaver.
+CMP
+JSB/RSB
+
+JMP
+
+BGTR	>  signed
+BLEQ	<= signed
+BNEQ	<>
+BEQL	=
+BGEQ	>= signed
+BLSS	<  signed
+BVC	overflow clear
+BVS	overflow set
+BCC	carry clear
+BCS	carry set
+
+Kun heltal med fortegn.  Kun 32-bit.
+Ingen heltal uden fortegn.  Ingen floating-point-værdier.  Ingen køer.  Ingen
+character fields.  Ingen bitfelter.
+
+
+
+Ops:
+  r0..r15,   r15=PC,  r14=SP
+
+  [reg]
+  imm
+  [imm]
+  [reg+imm]
+
+  Jeg ved godt VAX'en har mere komplicerede ops og at imm fås i to varianter:
+  små imm der er en del af opspec-byten og større imm der i virkeligheden læses
+  fra memory via r15/PC.
+
+  VAX'en har fx autoinc/dec.  Det gider jeg bare *slet* ikke!
+
+
+
+Flag
+---
+NZVC
+
+N - Negative
+Z - Zero
+V - oVerflow
+C - Carry
+
+Sættes efter resultatet af ADD/SUB/MUL/DIV.
+C sættes efter SHL/SHR.
+
+
+
+Modes
+---
+Ingen.  Ingen privilege levels, ingen interrupt-beskyttelse (for der er ingen
+interrupts), ingen PDP-11 mode, ingen instruktionstracing.
+
+
+
+Interrupts, traps, exceptions, µtraps
+---
+Ingen.
+
+
+
+MMU, cache, memory-mapped I/O
+---
+Ingen MMU.  Ingen TLB'er.  Ingen adresseoversættelse.  Ingen caching.  Ingen
+memory-mapped I/O.
+
+
+
+Pipeline
+---
+Den er der ingen af endnu.
+
+Fetch findes ikke -- går ud fra at alle bytes er umiddelbart tilgængelige.
+
+Dekoderen kan se lige så mange bytes ad gangen som den har lyst til.  Internt
+deler jeg den op i flere bidder som ikke kan se helt så meget ad gangen.
+Dekoderen afleverer en sekvens af µops.
+
+Datapath tager en µop-sekvens.  De bliver eksekveret en µop ad gangen, på en
+ikke-overlappende manér.
+
+Dekoder og datapath skiftes til at blive aktiveret.
+
+Dekoder læser r15 -- selv om det er hardwaremæssigt urealistisk.
+
+Dekoder tæller r15 op.  I tilfælde af jump/call/return, vil datapath skrive den
+en ny værdi ind i r15.  Call... den returadresse der skal gemmes er netop den
+som dekoderen afleverer, nemlig adressen på instruktionen efter call.
+
+Der er for øjeblikket ingen transaktionslogik til spekulativ kørsel (branches)
+eller micro exceptions (TLB miss, evt andre exceptions).
+
+Mul/div/shift/rotate (instruktioner som tager flere cycles på simple data paths)
+bliver i første omgange implementeret med en enkelt µop for kernefunktionaliteten.
+Dvs vi leger at vi har en magisk flash multipler, flash divider, barrel shifter.
+En mere realistisk implementation vil tage adskillige cycles, fx en cycle per
+bit i operandbredden for mul/div og en cycle per bit der shiftes med for shift/
+rotate.  Om det datapath så skal styres af en lokal tilstandsmaskine eller via
+en sekvens af µops fra dekoderen har jeg ikke taget stilling til endnu.  Og om
+der skal foregå feedback fra datapath til dekoder (for at implementere early
+out for mul/div) ved jeg heller ikke.
+
+Load/store foregår med det samme, dvs det giver ikke mening at snakke om wait
+states og stalls endnu.  Men jeg regner med at det kommer til at give mening at
+stalle pipelinen fra load/store-enheden på et tidspunkt.  Hvis mul/div/shift/
+rotate bliver styret af lokale tilstandsmaskiner kommer de måske også til at
+kunne stalle pipelinen.
+
+Eftersom intet er reelt pipelinet endnu er der ingen pipeline stages.  Det nærmeste
+vi kommer pipeline stages er sekvensen af µops som bliver overført fra dekoder
+til datapath.
+
+Når der kommer en pipeline, skal vi så have pipeline stalls eller forwarding?
+Begge dele gør tingene mere komplicerede.  Forwarding er hurtigere.  Stalls
+kræver færre gates og mindre areal (gates + wires).
+
+Skal have en mulighed for at køre datapath en µop ad gangen OG pipelined, så
+man kan checke pipelinen.
+
+
+
+Decoder
+---
+Dims der kigger på 1-2 opcode bytes.  Laver klassifikation: hvilke og hvormange
+ops?  Er de fx read, write, modify, branch?  1 eller 2 opcode bytes?
+
+Dims der kan parse en op (+ matche den med det forventede -- er det en gyldig
+write/modify op?).
+
+Adgang til registersæt.  Kun r0..r15, ikke flagene.  r15 er det eneste register
+der bliver skrevet til.  De andre kan læses som en del af ops.
+
+Faktisk får dekoderen IKKE adgang til r0..r14, kun r15.  Hvis de andre registre
+refereres i instruktionen, så sendes registernumre videre som parametre til
+µops, evt i form af LD/ST.
+
+Genererer sekvens af µops.  De fleste instruktioner bliver til src1-µops, src2-
+µops, kerne-µops, dst-µops.
+
+Tæller for midlertidige, interne registre.
+
+Senere: special-casing for simple ops (registre, immediates, en enkelt simpel
+memory ref per instruktion).
+
+
+
+Datapath
+---
+På et tidspunkt vil jeg gerne have et pipelinet, realistisk data path.
+Noget i retning af:
+  register renaming
+  register read
+  ALU (add/sub/logic/shift)
+  write back/mem
+
+Og jeg vil gerne have pipeline stages ind i mellem.  Og jeg vil gerne have at
+hvert trin kun ved hvad det får besked på fra pipestage + evt stall signal.
+
+Register renaming er selvfølgelig først nødvendigt når der bliver implementeret
+branch prediction og/eller (micro) exceptions (TLB miss, div/0).
+
+Starter med et simpelt loop omkring en switch der fortolker hvert af de mulige
+µops.
+
+
+
+Datapath II
+---
+ALU med ALU chips + carry generator chip.  ALU chips kan foruden add/sub også
+lave and/or/xor/nand/nor/nexor.
+
+Shift via shift register chip eller via MUX?
+
+µop til at splitte 32-bit fp i felter?  Eller til at lave ADD/SUB hvor ALU er
+splittet i to-tre felter?  Eller til at lave ADD/SUB samtidig med CMP eller
+shift eller 0-test?
+
+
+
+Microcode
+---
+Stort set alle de svære ting bliver håndteret via mikrokode.  Næsten ingen
+instruktioner kræver feedback, dvs. de kan håndteres ved ren feed-forward.
+
+
+
+µops
+---
+µops har et opcodefelt på 5 bits.
+µops specificerer 0/1 register for writeback.
+µops specificerer 0/1/2 sourceregistre.
+µops kan specificere en 8-bit immediate mask for branches.
+     4 bit til AND, 4 bit til EQ test.
+     *** Nope!
+µops specificerer ingen store immediates.  I stedet bruges registre.  Der er de
+16 alm. registre + 16 der kun er tilgængelige internt.  Alle registerfelter er
+på 5 bits.
+
+pga indexed adressing kan det være en god idé med et felt der shifter 0/1/2
+bits.
+
+nogle µops ændrer flagene, nogle gør ikke.  Derfor er der et felt der siger
+hvordan flagene skal ændres.  Lad os starte med 2 bits, velvidende at det ikke
+er nok.
+
+
+Memops dekodes til LD/ST µops.
+
+
+NOP
+
+ADD	d, s1, s2
+ADC	d, s1, s2
+SUB	d, s1, s2
+SBB	d, s1, s2
+
+SHL	d, s1, s2
+SHR	d, s1, s2
+
+CMP	s1, s2
+
+
+MULSTEP
+DIVSTEP
+
+BR	target
+Bcc	target, cond
+
+Vi ønsker i virkeligheden at kigge på 6 forskellige bitkilder og sammenligne
+dem med 0/1:
+	N|Z	>, <=   signed
+	C|Z	>, <=	unsigned
+	Z
+	N
+	V
+	C
+
+Vi har 12 forskellige tests.  Det passer i et 4-bit felt.
+Måske skal alm. ubetinget branch bruge samme µopcode og være test nummer 13?
+Brug bit 0 til at sige om der skal sammenlignes med 0 eller 1.
+
+
+		NZVC
+BGTR	target, (N|Z) = 0	>  signed
+BLEQ	target, (N|Z) = 1	<= signed
+BNEQ	target, Z = 0		<>
+BEQL	target, Z = 1		=
+BGEQ	target, N = 0		>= signed
+BLSS	target, N = 1		<  signed
+BVC	target, O = 0		overflow clear
+BVS	target, O = 1		overflow set
+BCC	target, C = 0		carry clear
+BCS	target, C = 1		carry set
+
+
+LD	d, addr
+ST	s, addr
+
+
+
+Operands
+---
+1 eller flere bytes.  Første byte er en opspec.  Den høje nibble siger hvad det
+er for en operand:
+
+ 0-3	bit 5..0 er en literal (0-63), zero-extended
+ 4	"indexed"           -- base[Rx], hvor base specificeres med en ny opspec
+ 5	"register"          -- Rn
+ 6	"register deferred" -- (Rn)                      = [Rn]
+
+ $8F	"immediate"	    -- (PC)+       dvs [PC++]	 =  imm
+ $9F	"absolute"          -- @(PC)+	   dvs [[PC++]]  = [imm]
+
+Bit 3..0 er et registernummer i alle andre tilfælde end hvis det er en short
+immediate.
+
+
+Hvad hvis man laver en lang kæde af "indexed" opspecs?  Det må man ikke.  Det
+er en "reserved operand mode".
+
+Indexregistret (fra den første opspec) ganges med datalen først.
+PC kan ikke være indexregister.  Base op kan ikke lave auto inc/dec på index-
+registret.
+
+(Rn)[Rx]	--  [Rn     + Rx*datalen]
+-(Rn)[Rx]	--  [--Rn   + Rx*datalen]
+(Rn)+[Rx]	--  [Rn++   + Rx*datalen]
+@(Rn)+[Rx]	--  [[Rn++] + Rx*datalen]
+
+
+uop: (opmode, Rn, Rx, sze) -> (1..4 µops)   # bruger nogle tmp regs, ingen
+                                              behøver vide hvilke
+
+Worst-case for en op er 4 µops for load/store.  Best-case er 0 (registre, immediates).
+ADDL3 worst-case er 4 µops for load src1, 4 µops for load src2, 1 µop for ADD,
+4 µops for store.  13 i alt.  De andre alm. ALU-instruktioner har samme worst-
+case.
+
+Kan have stalls pga cache misses, pga alignment stalls.
+
+
+
+
+Opcodes
+---
+C0	ADDL2
+C1	ADDL3
+
+D8	ADWC	add w/ carry
+
+D1	CMPL
+
+C6	DIVL2
+C7	DIVL3
+
+D0	MOVL
+
+C4	MULL2
+C5	MULL3
+
+01	NOP
+
+DD	PUSHL
+
+D9	SBWC	sub w/ carry (borrow)
+
+C2	SUBL2
+C3	SUBL3
+
+xx	MOV
+xx	MOVA
+xx	PUSHA
+
+xx	BR
+xx	JMP
+
+
+ADD ONE AND BRANCH IF NOT ZERO
+SUB ONE AND BRANCH IF NOT ZERO
+
+
+
+Memory
+---
+Et enkelt array på 1024 bytes.  Senere kan man lave tricks med en "TLB" og med
+en flok sider à 512.
+
+Ingen memory-mapped I/O.
+
+Skrivning til ikke-eksisterende memory ignoreres.
+Læsning fra ikke-eksisterende memory giver FF.
+
+
+
+Tools
+---
+Assembler, brug fornuftig syntax til memory refs.
+	labels (med ':').
+	label +/- imm, $ +/- imm.
+	DB, DW, DL,  ASCII-strenge i DB
+	ORG
+
+Disassembler.
+Disassembler for µops.
+Single-stepper?
+Tabeldrevet dims for µops?  Og for instruktionsklassificering?
+PLA-generering?
+
+Trace ops/µops, hvilke dele af CPU-state der ændres.  Gerne med ESC sequences
+  og unicode chars.
+
+Måske en HTML/"web 2.0"-udgave?  Kunne være fedt til highlight af ændringer og
+til smuk disassembly.
+
+
+
+VAX'en er dåm!
+---
+Det var dog bizart så mange "commercial" instruktioner der er.  Og så mange
+dumme floating-point instruktioner... uden at der er SQRT/EXP/LN/SIN/COS/TAN osv.
+Og ikke engang IEEE.
+
+Vektorinstruktionerne er irriterende.  Og jeg ved ikke hvilke opcodes de stjæler.
+Eller hvordan deres "control word" skal tolkes.
+
+Opspecs er underspecificerede.  VAX 9000-artiklen snakker om 59 forskellige
+kombinationer (vist hvis man regner PC-relative adresser for sig + regner
+kombinationer med index/base med... kan stadig ikke se hvordan det kan give
+mere end ca 40).
+
+Uklart hvor lange instruktionerne egentlig kan være.  Der står "more than 50
+bytes" mange steder men det er som om ingen har regnet efter.  Og jeg kan ikke
+se hvordan man kan komme op på så meget hvis hver operand max kan tage 6 bytes
+(via index/base med 32-bit immediate) og der max kan være 6 operander og opkoden
+max kan tage 2 bytes.
+
+Stort set(?) alle instruktioner der har en destination ændrer flagene.  Der er
+flere måder at ændre flag på og nogle af dem lader C være uændret.
+
+Hvorfor er der ikke nogen POPL når der er PUSHL?
+
+Er det bare mig eller mangler der rotationsinstruktioner?
+
+Sjovt at shift tager et shiftcount med fortegn, dvs at samme instruktion kan
+shifte i begge retninger.
+
+Kun aritmetisk shift, kun 2 instruktioner.  Rotate er der også kun 1 af.  Hvis
+man vil have et logisk shift kan man bruge bitinstruktionerne (extract).
+
+Selvmodificerende kode kræver en REI (Return from Interrupt?!) for at resynche.
+Ændringer i adressemapping kræver at en af de virtuelle adresser der bliver
+remappet bliver skrevet til et internt processorregister.  Og det er for hver
+side.  Man kan også invalidere dem alle sammen i et enkelt hug, hvis der er
+for mange sider der ændrer mapping.
+
+Memoryspecs i assembler er virkeligt meget lidt gennemtænkte.
+
+Så vidt jeg kan se er der ingen instruktioner der har mere end 6 ops.  Hver op
+kan referere op til 2 registre og modificere 1 register (auto inc/dec).
+
+Hvorfor er der ikke nogen CMPXCHG?  Eller LOCK XCHG?
+
+Faktisk kunne man jo godt udvide VAX'en med lidt præfixer :)
+
+Hvorfor er VMS' AST'er implementeret delvist i hardware via softwareinterrupts?!
+Ved at skrive til et bestemt processorregister (priviligeret instruktion) sætter
+man en bit i et register der siger hvilke pending software interrupts man har.
+Det bliver så checket med interrupt priority level og evt håndteret med vektor
+og det hele når IPL bliver lav nok.
+
+
+
+PDP-11, Compatibility Mode
+---
+Min pre/core/post-model burde virke fint for PDP-11 også.  Formodentlig endda
+med genbrug af næsten al µkoden.
+
+Glæder mig til at lave en dekoder!
+
+Så vidt jeg kan se burde det ikke være svært at lave en 
+
+
+FP
+--
+ADD/SUB/MUL/DIV/EMOD/POLY + CMP/CVT/MNEG/TST.
+
+For at gøre det tydeligt hvad der foregår + gøre det så sikkert som muligt at
+modellen er korrekt + gøre det så nemt som muligt at implementere i HW, ville
+det være rart hvis FP også blev implementeret.
+
+Hvis man nu tilføjer lidt flere µops?  Noget med shift, ffs, extract af felter,
+merge af felter, integer add/sub med reduceret bitbredde, integer mul/div med
+reduceret bitbredde, afrunding?
+
+Det burde gøre det nemt at implementere dem, inkl. POLY.
+
+
+
+JIT
+---
+Hvorfor skal det gå langsomt?  Man kan bruge dekoderen (+ driving af den via
+exe_uinstr()) til at generere uops.  Dem kan man så lave en meget simpel JITting
+af.  Branches laves så de kan JITtes ind senere.
+
+Det kan man køre med indtil REI.  Og man behøver ikke invalidere alt ved REI,
+det er bare det nemmeste at gøre.
+
+
+
+
+
+Nitty-gritty questions
+---
+
+ Bitfields
+ ---
+
+Bitfield instructions are allowed to read/write more bytes than those directly
+affected by their fields.  That's because they are allowed to use aligned
+longword reads/writes.
+
+Note: if the field size is 0, they are not allowed to read/write anything in
+memory!
+
+Unclear if bitfield instructions are allowed to read/write 2 registers if the
+field fits entirely within the first register.  This matters if the field
+starts in r14 -- is this legal if the field fits entirely within r14?  It is
+clearly illegal if it doesn't, because then it would spill over into r15.
+
+Bitfield instructions are apparently allowed to read from a bitfield specified
+as a long immediate.
+
+Are they really not allowed to read from short immediates?
+
+What happens when INSV has a bitfield specified as a long immediate?
+
+
+ Interlocked access
+ ---
+How do we unlock without storing?
+
+
+
+
+Interlocked access
+---
+Read-modify-write sequence where no other processor (or I/O device) can get a
+read or write access in between our processor's read and write.
+
+The simulator emulates a CVAX-like bus so there is no actual bus locking.
+Other processors (and I/O devices) are allowed to run bus transactions in between
+our read and write transactions.  They are even allowed to run *other* interlocked
+sequences, as long as they don't interfere with *our* interlocked sequence.
+
+The address space is split into *interlock grains* which may be a whole 512-byte
+page.  An interlocked sequence only locks other devices out of interlocked
+access to its interlock grain.  Non-interlocked reads/writes to the same
+interlock grain are fully allowed.
+
+Each device can only interlock a single interlocked grain at a time.
+
+There are two microcode instructions for interlocked access:
+  LDI	load interlocked
+  STU	store w/ unlock
+
+How do we unlock without storing?  In case of an exception?
+
+
+
+
+
+   How the actual register allocation and the fragment breakdown works.
+   ---
+
+   access types
+      r/m/w/a/v		read/modify/write/address/vector (bitfields)
+
+   data types
+      b/w/l/q  f/d/g	byte/word/long/quad  float/double/"grand"
+
+   There are also 'bb' and 'bw' for branches with byte/word displacement but
+   they don't have operand specifiers.
+
+   Actual operands can be I/R/M depending on the operand descriptor --
+   immediate/register/memory.
+
+   The decoder selects the appropriate µcode fragment(s) depending on the
+   operand descriptor for the pre phase and later the appropriate µcode
+   fragment(s) for the post phase (if any).   Some fragments come in two
+   versions, depending on the size of the data type (1 or 2 32-bit words).
+
+
+     memreadi
+
+   pre-phase fragments:
+     imm, imm2
+     regread, regread2
+     memread, memread2
+     memreadi,
+     vimm, v1imm
+     vregread, v1regread
+     vmemread, v1memread, v1memreadi
+     addr		-- actually many different fragments depending on
+     			   operand descriptor, some of which use t0/t1 tmp
+     			   registers.
+     branch
+
+     resop		-- reserved operand type (error)
+
+   post-phase fragments:
+     regwrite, regwrite2
+     memwrite, memwrite2
+     memwritei
+     vregwrite
+     vmemwrite, v1memwrite, v1memwritei
+
+
+   access type/operand class table:
+	   pre				post
+
+     rb/rw/rl/rf (8/16/32/32-bit)
+     	I: imm				-
+     	R: regread			-
+     	M: addr, memread		-
+     	1 out
+
+     rq/rd/rg (64-bit)
+        I: imm2				-
+        R: regread2			-
+        M: addr, memread2		-
+        2 out
+
+     mb/mw/ml/mf (8/16/32/32-bit)
+     	I: %			-
+     	R: regread			regwrite
+     	M: addr, memread		memwrite
+     	2 out				1 res, 1 reg
+
+     mi -- mw.i (32-bit interlocked)
+     	I: %			-
+     	R: regread			regwrite
+     	M: addr, memreadi		memwritei
+     	2 out				1 res, 1 reg
+
+     mq/md/mg (64-bit)
+        I: %			-
+        R: regread2			regwrite2
+        M: addr, memread2		memwrite2
+        3 out				2 res, 1 reg
+
+     wb/ww/wl/wf (8/16/32/32-bit)
+	I: %			-
+	R: -				regwrite
+	M: addr				memwrite
+	1 out				1 res, 1 reg
+
+     wq/wd/wg (64-bit)
+        I: %			-
+        R: -				regwrite2
+        M: addr				memwrite2
+        1 out				2 res, 1 reg
+
+     ab/aw/al/aq (8/16/32/64-bit)
+     	I: %			-
+     	R: %			-
+     	M: addr				-
+	1 out
+
+     vr -- vb.r  read field
+        I: ?				-
+        R: vregread			-
+        M: addr, vmemread		-
+        ? out
+
+     vm -- vb.m  modify field
+        I: %				-
+        R: vregread			vregwrite
+        M: addr, vmemread		vmemwrite
+        ? out
+
+     v1 -- vb.1  read 1-bit field
+        I: %				-
+        R: v1regread			-
+        M: addr, v1memread		-
+        ? out
+
+     vi -- vb.i  modify 1-bit field interlocked
+        I: %				-
+        R: v1regread			v1regwrite
+        M: addr, v1memreadi		v1memwritei
+        ? out
+
+     bb/bw
+        branch
+        1 out
+
+   This analyzer cannot possibly know what the actual operand descriptors will
+   be at runtime but we have to allocate.
+
+   When the decoder starts a memread/memread2 fragment, it has always issued an
+   addr fragment first, which references <op>, and any such reference will step
+   the register counter to the next register.  But the register is used by
+   memread/memread2 to read from memory (through an <op> reference) so the
+   decoder decrements the register counter before starting the memread/memread2
+   fragment.
+
+   When the decoder outputs post fragments the <op> have to reference the
+   right register with the address.  FIXME -- seems complicated :(
+
+
+FIXME:  where are register(s) checked for clash with r15/PC?
+FIXME:  make a C table like the above prose table that indicates which fragments
+        to use when?  There are 13 groups, based on the oppair.  M always seems
+        to be 'addr' first for all 12 groups except bb/bw.  M is also the only
+        class two need two fragments sometimes in the pre phase.
+
+

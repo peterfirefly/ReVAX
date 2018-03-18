@@ -1,0 +1,36 @@
+//  Draft of description file to feed into disassembler.  2017-07-17.
+
+header {
+			// copy to output file
+}
+footer {
+			// copy to output file
+}
+
+ranges {
+xxx-xxx		code
+xxx-xxx		code
+xxx-xxx		data
+xxx-xxx		data
+xxx-xxx		code
+xxx		code		// flood-fill start addr
+}
+
+
+data XXX {
+xxx:	string[23]
+xxx:	bytes[34]
+xxx:	f, f, l, l, b, b, b, b, q
+}
+
+code XXX {
+
+label call@xxx
+label local@xxx
+label @xxx
+newline @xxxx
+
+xxx:	DEF=0x2323
+xxx:	decimal/hex/octal/%04X_%04X	// kan vi angive hvor '_' skal indsættes?
+}
+

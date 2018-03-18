@@ -1,0 +1,20 @@
+The source code I've written for this project is licensed under GPL v2.
+
+There are other source code and text files in the repository that are not
+written by me and are not GPLv2 licensed.
+
+My stuff is the build script (Makefile) and the source code in src/ and misc/,
+and the (very simple) test programs in runtime/.
+
+The other stuff is things like VAX microcode, documentation, FILES-11 (ODS-2)
+readers (I have modernized one of them but those were just minor changes), and
+assorted VAX binaries for testing purposes.
+
+The VAX microcode and CVAX design documents (+ ka655x.bin) came from Bob
+Supnik's SimH web site.  Bob Supnik wrote most of that microcode originally,
+back in the 80's when he worked for DEC.
+
+All my stuff should have a copyright/license header but I might have forgotten
+to write one on all of them.  This should not be taken as an indication that
+I didn't write that file or that I didn't intend it to be GPLv2 licensed.
+

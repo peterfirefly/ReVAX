@@ -1,0 +1,323 @@
+        2.8  Processor Registers
+
+
+        Each of the processor registers listed in the table below  falls
+        into one of the following categories:
+
+                1  =    implemented by the CVAX CPU Chip as specified
+                        in the VAX Architecture Standard (DEC Standard 032)
+                2  =    implemented by the CVAX CPU Chip uniquely
+                3  =    passed to external logic via an external processor
+                        register cycle;  if not implemented externally,
+                        read as zero, nopped on write
+                4  =    access not allowed (reserved operand fault)
+
+        The column labeled "INIT?" means is this register initialized in the CVAX on chip power-up
+        microcode. 
+                YES =  it is initialized by power-up code
+                NO  =  it is NOT initialized by power-up code but IS valid
+                --- =  register contents are undefined after power-up
+
+        Number  Register Name                        Mnemonic   Type    Scope   Init?   Category
+        ------  -------------                        --------   ----    -----   -----   --------
+
+          0     Kernel Stack Pointer                    KSP     rw      proc    --      1
+          1     Executive Stack Pointer                 ESP     rw      proc    --      1
+          2     Supervisor Stack Pointer                SSP     rw      proc    --      1
+          3     User Stack Pointer                      USP     rw      proc    --      1
+          4     Interrupt Stack Pointer                 ISP     rw      cpu     --      1
+          5     not implemented                           --      --      --      --      3
+          6     not implemented                           --      --      --      --      3
+          7     not implemented                           --      --      --      --      3
+
+          8     P0 Base Register                        P0BR    rw      proc    --      1
+          9     P0 Length Register                      P0LR    rw      proc    --      1
+         10     P1 Base Register                        P1BR    rw      proc    --      1
+         11     P1 Length Register                      P1LR    rw      proc    --      1
+         12     System Base Register                    SBR     rw      cpu     --      1
+         13     System Length Register                  SLR     rw      cpu     --      1
+         14     not implemented                           --      --      --      --      3
+         15     not implemented                           --      --      --      --      3
+
+         16     Process Control Block Base              PCBB    rw      proc    --      1
+         17     System Control Block Base               SCBB    rw      cpu     --      1
+         18     Interrupt Priority Level                IPL     rw      cpu     yes     1
+         19     AST Level                               ASTLVL  rw      proc    yes     1
+         20     Software Interrupt Request              SIRR    w       cpu     --      1
+         21     Software Interrupt Summary              SISR    rw      cpu     yes     1
+         22     not implemented                         --      --      --      --        3
+         23     not implemented                         --      --      --      --        3
+
+         24     Interval Clock Control                  ICCS    rw      cpu     yes      2
+         25     not implemented                         --      --      --      --        3
+         26     not implemented                         --      --      --      --        3
+         27     not implemented                         --      --      --      --        3
+         28     not implemented                         --      --      --      --        3
+         29     not implemented                         --      --      --      --        3
+
+CMOS-2 CVAX CPU ENGINEERING SPECIFICATION (Company Confidential)         Page 51
+ARCHITECTURE SUMMARY
+
+
+         30     not implemented                         --      --      --      --        3
+         31     not implemented                         --      --      --      --        3
+
+         32     not implemented                         --      --      --      --        3
+         33     not implemented                         --      --      --      --        3
+         34     not implemented                         --      --      --      --        3
+         35     not implemented                         --      --      --      --        3
+         36     not implemented                         --      --      --      --        3
+         37     Cache Disable                           CADR    rw      cpu     yes      2
+         38     not implemented                         --      --      --      --        3
+         39     Memory System Error                     MSER    rw      cpu     yes      2
+
+         40     not implemented                         --      --      --      --        3
+         41     not implemented                         --      --      --      --        3
+         42     Console Saved PC                        SAVPC   r       cpu     --       2
+         43     Console Saved PSL                       SAVPSL  r       cpu     --       2
+         44     not implemented                         --      --      --      --        3
+         45     not implemented                         --      --      --      --        3
+         46     not implemented                         --      --      --      --        3
+         47     not implemented                         --      --      --      --        3
+
+         48     not implemented                         --      --      --      --        3
+         49     not implemented                         --      --      --      --        3
+         50     not implemented                         --      --      --      --        3
+         51     not implemented                         --      --      --      --        3
+         52     not implemented                         --      --      --      --        3
+         53     not implemented                         --      --      --      --        3
+         54     not implemented                         --      --      --      --        3
+         55     not implemented                         --      --      --      --        3
+
+         56     Memory Management Enable                MAPEN   rw      cpu     yes     1
+         57     Trans. Buf. Invalidate All              TBIA    w       cpu     --      1
+         58     Trans. Buf. Invalidate Single           TBIS    w       cpu     --      1
+         59     not implemented                         --      --      --      --        3
+         60     not implemented                         --      --      --      --        3
+         61     not implemented                         --      --      --      --        3
+         62     System Identification                   SID     r       cpu     no      1
+         63     Translation Buffer Check                TBCHK   w       cpu     --      1
+
+        64:127  reserved                                --      --      --      --         4
+
+        The implementation specific processor  registers  are  described
+        below.
+
+
+
+        2.8.1  Interval Clock Control And Status Register (ICCS) -
+
+        The  ICCS  register  controls  the  interval  timer  (INTTIM  L)
+        interrupt.   It is similar to the ICCS register described in the
+        VAX Architecture Specification but contains only a single bit to
+        enable or disable the interval timer interrupt:
+
+CMOS-2 CVAX CPU ENGINEERING SPECIFICATION (Company Confidential)         Page 52
+ARCHITECTURE SUMMARY
+
+
+
+                 3
+                 1                                              7 6 5          0
+                +------------------------------------------------+-+------------+
+                |                                                |I|            |
+                |                                                |E|            | : ICCS
+                +------------------------------------------------+-+------------+
+
+        Bit <6> is read/write.  When set, interval timer interrupts  are
+        enabled  at  IPL16;  when  clear,  interval timer interrupts are
+        disabled.  Bits <31:7,5:0> read  as  zero  and  are  ignored  on
+        writes.  Bit <6> is cleared in the restart process.
+
+
+
+        2.8.2  Cache Disable Register (CADR) -
+
+                 3
+                 1                                            8 7 6 5 4 3 2 1 0
+                +----------------------------------------------+---+---+-+-+-+-+
+                |                                              |SEN|CEN| | |W|D|
+                |                       0                      |   |   |1|1|W|I| : CADR
+                |                                              |   |   | | | |A|
+                +----------------------------------------------+---+---+-+-+-+-+
+
+        CADR <31:8> always read as 0's.  CADR<3:2> always reads  as  11.
+        CADR  <7:4,1:0>  initialize  to  0 when RESET L is asserted.  If
+        CADR<0> is 0, the cache  is  flushed  (all  valid  bits  set  to
+        invalid  state)  whenever the CADR is written.  Writing the CADR
+        will not flush the cache if CADR<0> is 1.
+
+        CADR <7:6> (Set  Enable)  are  read/write  and  are  encoded  as
+        follows:
+
+                        <7:6>           Set 2           Set 1
+                        -----           -----           -----
+                         00             disabled        disabled
+                         01             disabled        enabled
+                         10             enabled         disabled
+                         11             enabled         enabled
+
+        CADR <5:4> (Cache Enable) are  read/write  and  are  encoded  as
+        follows:
+
+                        <5:4>           Action
+                        -----           ------
+                         00             Cache disabled
+                         01             D-stream only stored in cache (diagnostic use)
+                         10             I-stream only stored in cache
+                         11             I-stream and D-stream stored in cache
+
+        When CADR <5:4> = 10 (I-stream only stored in cache),  the  CVAX
+        CPU  chip  automatically  flushes  the  cache  whenever  an  REI
+        instruction is  executed.   The  VAX  SRM  states  that  an  REI
+        instruction  must  be  executed  prior to running code out of an
+        updated page of memory.  Therefore, systems that follow the  SRM
+
+CMOS-2 CVAX CPU ENGINEERING SPECIFICATION (Company Confidential)         Page 53
+ARCHITECTURE SUMMARY
+
+
+        need  not monitor DMA writes in order to prevent stale data from
+        accumulating  in  the  cache.   When  CADR<5:4>  =  11  or   01,
+        invalidate-on-hit  cycles must be used to remove stale data from
+        the cache.
+
+        CADR  <1>  (Write  Wrong  Parity)  is  read/write.   When   set,
+        incorrect  parity  is  stored in the cache whenever the cache is
+        written.
+
+        CADR  <0>  (Diagnostic  mode)  is  read/write.   When  set,  all
+        quadword  write  references write through the cache irrespective
+        of hit/miss or bus error status.   In  addition,  no  bus  error
+        induced  machine  check  abort  is generated during a bus write.
+        When  cleared,  a  normal  non-allocating  cache  write  through
+        operation  occurs during write cycles.  Diagnostic mode does not
+        effect read operations.
+
+        Note that diagnostic mode blocks the flush of the cache when the
+        CADR  is  written.   There  are  several restrictions on the way
+        Diagnostic mode can be used.
+
+
+        1.  Diagnostic mode should only be  selected  when  one  set  is
+            enabled.
+
+        2.  The exact diagnostic allocation mechanism is very  esoteric.
+            A  validate  write  allocation will occur only if a specific
+            sequence of instructions is followed.  The first instruction
+            must  be  a  quadword  write  (MOVQ)  to  a quadword aligned
+            destination.  This instruction writes the second longword of
+            the  source operand to the first longword of the cache entry
+            selected by the destination address.  The first longword  of
+            the  source is not used and the second longword of the cache
+            entry remains unchanged.  In addition,  the  cache  tag  and
+            valid  bits  are  set so that subsequent reads and writes to
+            either longword in the destination will report a cache hit.
+
+        3.  The second instruction must be a cacheable read operation.
+
+        4.  The third instruction  must  be  a  longword  write  to  the
+            address  corresponding  to  the second longword in the cache
+            entry.  A macrocode listing illustrating  this  sequence  is
+            shown below:
+                            .
+                            .
+                            .
+            MOVQ    #quadsrc, @#quaddst     ; writes longword quadsrc+4 into longword quaddst
+            MOVL    #quaddst, R0            ; reads allocated longword quaddst
+            MFPR    #mser, R1               ; get MSER in order to look at H/M bit later
+            MOVL    #longsrc, @#(quaddst+4) ; writes 2nd longword quaddst+4
+                            .
+                            .
+                            .
+
+            When this sequence is followed,  each  cache  entry  can  be
+            allocated with any arbitrary address.
+
+CMOS-2 CVAX CPU ENGINEERING SPECIFICATION (Company Confidential)         Page 54
+ARCHITECTURE SUMMARY
+
+
+        2.8.3  Memory System Error Register (MSER) -
+
+                 3
+                 1                                            8 7 6 5 4 3 2 1 0
+                +----------------------------------------------+-+-+-+-+-+-+-+-+
+                |                                              |H|D|M|M| | |D|T|
+                |                       0                      |M|A|C|C|0|0|A|A| : MSER
+                |                                              | |L|D|C| | |T|G|
+                +----------------------------------------------+-+-+-+-+-+-+-+-+
+
+        MSER <31:8> always read as 0's.  MSER<3:2> always read  as  0's.
+        MSER <6:4,1:0> are read/write and initialize to 0's when RESET L
+        is asserted.  MSER <7> is read-only and initializes  to  0  when
+        RESET  L  is asserted.  MSER<6:4,1:0> are cleared whenever it is
+        written (MTPR MSER), irrespective of the write data.
+
+        MSER <7> (hit/miss) is updated only on references  that  can  be
+        potentially  stored  in  the cache.  This excludes all I/O space
+        references; if CADR <5> = 0, all memory space instruction stream
+        references;  if  CADR  <4>  =  0,  all  memory space data stream
+        references; and all read lock  references.   On  all  references
+        that  qualify, MSER <7> is cleared if the reference is stored in
+        the cache and set if it is not stored in the cache.
+
+        MSER<6> (DAL parity error) is set whenever a DAL parity error is
+        detected on either a demand or request read cycle.
+
+        MSER <5> (machine  check  abort  -  DAL  parity  error)  is  set
+        whenever a machine check is caused by a DAL parity error.  A DAL
+        parity error will only cause a machine check on  a  demand  read
+        cycle.
+
+        MSER <4> (machine check abort  -  cache  parity  error)  is  set
+        whenever  a machine check is caused by a cache parity error (tag
+        or data).  A cache parity error will only cause a machine  check
+        on a demand read cycle.
+
+        MSER<1:0> are independently set to show the  scope  of  a  cache
+        parity  error  on  either a demand or request cycle.  MSER<0> is
+        set to indicate that the cache parity error was caused by a  tag
+        error; MSER<1>, by a data error.  Note that a simultaneous cache
+        tag and data parity error will only log the fact  that  a  cache
+        tag parity error occurred.
+
+        MSER <6:4,1:0> are sticky in  the  sense  that  once  set,  they
+        remain  set until MSER is explicitly cleared by writing the MSER
+        (MTPR MSER irrespective of the data).  Parity  errors  occurring
+        while  an  error  condition  is  posted  in  MSER  can  only set
+        additional  bit,  i.e.,  MSER<6:4,1:0>  cannot  be  cleared   on
+        subsequent errors.
+
+
+
+        2.8.4  Console Saved Registers (SAVPC, SAVPSL) -
+
+        The console saved registers (SAVPC, SAVPSL) record the value  of
+
+CMOS-2 CVAX CPU ENGINEERING SPECIFICATION (Company Confidential)         Page 55
+ARCHITECTURE SUMMARY
+
+
+        the PC and PSL, respectively, at the time a chip restart occurs.
+        See the section on Restarts, above, for details.
+
+
+
+        2.8.5  System Identification Register (SID) -
+
+        The SID is a read only  constant  register  that  specifies  the
+        processor  type  as  a  CVAX  CPU  (SID<31:24>=10 decimal).  The
+        SID<7:0> reflects the microcode revision level.
+
+                 3              2 2
+                 1              4 3                           8 7             0
+                +----------------+-----------------------------+---------------+
+                |                |                             |               |
+                |  10 (decimal)  |           RESERVED          | Microcode Rev.|
+                |                |                             |               |
+                +----------------+-----------------------------+---------------+
+
+CMOS-2 CVAX CPU ENGINEERING SPECIFICATION (Company Confidential)         Page 56
+INTERNAL CACHE
+

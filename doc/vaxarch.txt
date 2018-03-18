@@ -1,0 +1,722 @@
+VAX architecture
+-------------------------------------------------------------------------------
+
+
+Overview
+---
+A really, really nice architecture -- but too big and too complicated in some
+ways.  A smaller, simpler version would have been *very* nice indeed.
+Not at all the complicated monster that RISC advocates claimed -- and most of
+their examples were *non-problems*.  The real problems lay somewhere else.
+
+16 GPRs, 32-bit each.  r15 is actually the program counter so not really a
+GPR at all.  Pretending that it is gives us immediates and position independent
+code for free.  Same registers used for 8/16/32/64-bit integers and for 32/64-bit
+floating-point values.  Some implementations even use them for 128-bit integer
+and floating-point values.
+
+Four of the GPRs have a fixed role in the VAX architecture.  One of them is
+r15 (PC).  Can never be used for anything else.  The stack pointer is r14 -- a
+few instructions have it hardcoded, so that's also unavailable for other
+purposes.  r12 and r13 are used as argument pointer and frame pointer in the
+standard calling convention.
+
+Register starved in some circumstances, mainly with floating-point.
+
+Flags.  4 status flags (NZVC).  Also contains various mode flags that control
+execution.  Not all of them can be set/read by non-privileged code.  All the
+non-prileged ones are in the lower 16 bits.
+
+Internal Processor registers.  The first 64 processor registers are architected,
+some implementations have many more (I think up to 256).  Not all of those registers
+are actually assigned any purpose + some are optional.
+Some registers are used for different purposes on different implementations.
+
+Some tables in memory -- page tables + system control block (interrupt/exception
+vectors) + process control block (process contexts).
+
+4 different protection rings.  Less privileged code can't read/write data
+belonging to more privileged rings.  Privilege level in PSL, page table entry.
+
+MMU system unusual, quite different from the typical systems x86, ARM, etc.
+Actually two page tables: one for process, one for system.  This gives us de
+facto a two-level page table for processes + allows us to put process page
+tables in virtual memory (i.e. on disk!).  Actually flat tables (arrays) instead
+of trees (like everybody else).  512-byte pages.
+
+Memory-mapped I/O -- all devices in upper physical address space, actual memory
+in lower physical address space.  Firmware typically in ROM in upper physical
+address space (wouldn't that make it slow?).
+
+Block instructions.  Can be interrupted.  Restartable.
+
+Optional PDP-11 userspace instructions.
+
+Precise exceptions.  Well-defined + works across all implementations (not true
+for 68K, for example).
+
+Alignment.
+
+Sequential consistency (or something very much like it).
+
+
+
+A complete architecture
+---
+Everything was in there from the beginning and the instruction set/architecture
+was almost never extended.
+
+A few subsetting mechanisms were developed in order to make implementation easier/
+cheaper/faster and to make the implementations themselves cheaper/smaller/faster.
+They also allowed tradeoffs between speed and cost in some cases.
+
+Some of the more esoteric original instructions turned out to be less useful
+than expected + there wasn't much of a performance gain from implementing them
+in microcode, so they quickly become emulated in software.  EDITPC and decimal
+instructions, for example.
+
+Other examples: the 128-bit instructions for integers (octowords) and floating-
+point values (h).  They were almost never used.
+
+It had an MMU that provided both address remapping, virtual memory, and access
+protection (write protection, 4 privilege rings).
+
+It had native support for context switches between processes.
+
+It had native support for 5 stack pointers: one for each privilege level + one
+for interrupts.
+
+Everything was byte-addressed and addresses were always 32-bits (virtual).
+
+The first multi-processor implementations were built only a few years after the
+first single-processor machine was built and there was support in the architecture
+for interlocked memory access right from the start.
+
+The architecture was prepared for caches right from the start: normal memory
+was expected to be cached but I/O memory (high addresses) was explicitly
+architected to be non-cached.
+
+The architecture had support for interlocked read-modify-write operations right
+from the start (including ADAWI that was specified to even work in I/O space)
+so even if multi-processors weren't available yet, it would work with certain
+I/O devices that read/wrote main memory.
+
+The cache system was I/O coherent right from the start.
+
+There was an architected way to perform self-modifying code (including in the
+form of program load), namely by executing the REI instruction.
+
+There was even an architected way to see which VAX implementation the software
+was running on!
+
+Precise exceptions.  S/360 got this wrong in some early implementations.  I
+think some of the RISC architectures also got it wrong.
+
+Exception handling uniform across implementations.  They varied a lot across
+the 68K family, for example.
+
+
+
+Avoided ugly transitions of RISC architectures, x86, 68K
+---
+x86 and 68K had no MMU originally.  68K could interface with an external MMU
+but it originally couldn't restart faulting memory instructions properly!
+Some vendors worked around this by using two 68K CPUs with one running slightly
+ahead of the other.  When the first faulted the other one was interrupt *before*
+it executed the faulting instruction.  That allowed virtual memory to be
+implemented correctly.
+
+x86 added first segmentation (286) and then paging (386).  It took from 8086 in
+1978 to 80386 in 1985 before it had paging and nice virtual memory.
+
+x86 and 68K both had integer mul/div from the start (slow, multicycle instructions).
+MIPS, SPARC, HP-PA didn't.  Problematic to speed up existing binaries on new
+CPUs *with* integer mul/div.
+
+Likewise with fp -- x86 didn't quite fp from the start but almost.  8087 not
+super well integrated into the architecture.  Asynch.  Needed explicit FWAIT
+instructions for synchronization.  Needed FSTSW to store 8087 flags into memory
+and then load it into AX and then execute LAHF to move them into the native flags
+so a conditional branch can be executed.  Really, really cumbersome.
+
+
+
+
+
+Flags
+---
+NZVC
+
+Would be nice if either ALL NZVC flags were set or NONE.  Unfortunately, some
+instructions set *some* flags.  Would also be nice if flags were set entirely
+on the basis of ALU operations -- but we can't do that, either.
+
+Integer overflow.
+Other trap possibilities.
+
+Bits in the high 16 bits of PSL.  Privilege level, trap (single-step), ...
+
+
+
+Too many native datatypes, instructions, and addressing modes
+---
+queues, bitfields, packed decimal, EDITPC, too many block operations
+
+Bitfields and queues are easier to implement in microcode (and to make fast)
+than they look at first glance so they were always implemented in microcode (or
+hardware for the bitfields).
+
+The others turned out to be cheap enough to emulate in firmware (written in VAX
+machine code).
+
+The addressing modes are (mostly) a natural superset of the PDP-11 addressing
+modes... but it was a step too far.  Inc/dec modes were less useful than expected
+and harder to make fast than expected.  They were also far more widespread in
+assembly and compiled code than was nice -- so hard to move the architecture
+away from.
+
+CALLS/CALLG/RET, use a register mask before the call target!  Pushes it to the
+stack, RET uses it to restore registers (and a flag bit).  This was probably a
+mistake.  I can understand why they did it: the PDP-11 used far too many different
+calling conventions.  Complicated, hard to make fast.
+
+JSB/RSB are much more sensible call/ret instructions, used internally in VAX
+code.  CALLS/CALLG/RET only expected to be used at external interfaces.
+
+
+
+32-bit, byte-oriented, microcoded, sequential interpretation
+---
+The VAX was designed from the beginning to be implemented with a full 32-bit
+datapath, with microcode that interpreted the instructions one byte at a time.
+The instruction encoding is very byte-oriented: each instruction begins with
+an opcode (one byte, unless the first byte is FD, in which case it is two bytes)
+and a sequence of 0 to 6 operands.  Each operand starts with an operand descriptor
+(one byte) and possibly an extra operand descriptor (also one byte) and one to
+eight bytes for an immediate value.
+
+You don't know how long the instruction is until the last operand specifier
+has been decoded.  You don't know where any of the operand specifiers are (except
+for the first) until after you have decoded all the previous operand specifiers.
+The VAX instruction set is *very* sequential.  The Japanese company NEC made
+an architecture in the 80's with 3 members (V60/V70/V80) that was very VAX-like.
+The major change they had made was to put all the operand specifiers right next
+to the opcode, thus making it much easier/faster to decode.  This also freed
+them from having to fit a register number and an address mode into a single byte,
+thereby allowing them to have 32 GPRs instead of just 16.  Their architecture
+also uses 2-address instructions (like the x86) much more than the VAX does.
+
+The actual operands can be in memory, pointed at by registers.  Those registers
+can potentially be incremented or decremented as part of the operand interpretation.
+
+So what happens if several operands want to increment/decrement the same
+register?  Or if a register is used as source for a bit field and the same
+register is then used in a increment/decrement addressing mode afterwards?
+
+In all cases, the correct behaviour is to do what is the simplest and obvious
+implementation on a microcoded machine that interprets the operands one byte
+at a time.
+
+There are a few instructions that operate on entities larger than 32 bits.
+Those are mainly 64-bit integers (quadwords) and 64-bit floating-point values
+(there are two kinds: d and g).  A few implementations also have native support
+for 128-bit integers (octowords) and 128-bit floating-point values (h).
+
+These instructions are carefully chosen so as not to be too difficult to implement
+with a 32-bit datapath.
+
+Shorter integers than 32-bit are also possible: 8 (byte) and 16 bits (word).
+ALU and MOV operations on those smaller entities only write 1 or 2 bytes to
+destination registers and leave the upper bytes untouched.  Flags are set based
+on the 8 or 16 bits of the operation, not based on the upper bits.
+
+The obvious implementation is to always use 32-bit reads from the register
+file (and allow two simultaneous reads) but to send the data width (8/16/32)
+to the ALU together with the 2 32-bit input busses and the operation specifier,
+and to send the data width (8/16/32) to the register file's write port together
+with the register number and the result value (on a 32-bit bus).
+
+The datapath on all machines supported a 64-bit shift/rotate operation natively,
+in order to support ASHQ (arithmetic shift quad) and the CMPV/CMPZV, EXTV/EXTVZ,
+FFS/FFC, INSV bitfield operations.  Granted, it was only a cheap one-bit-at-a-
+time shift register at first.  The later models got a full barrel shifter.
+
+
+
+Integrated floating-point
+---
+Floating-point operations were fully integrated into the architecture -- they
+set the same flags as integer operations, for example -- but implementations
+were made that could operate both with hardware floating-point and with emulation
+in microcode or software(?).  The application software never had to know, which
+is very different from the 68K, x86, various RISCs.
+
+Floating-point values in GPRs.  Nice in some ways, problematic in others.
+Double-precision code is register starved because each value takes two GPRs +
+GPRs are needed for indices and pointers and there are only 12 GPRs available
+to the code.
+
+The floating-point format isn't IEEE -- because that wasn't invented yet.
+It looks a lot like a simpler version of IEEE, because that's what it is.
+IEEE took the many good ideas of VAX floating-point and added a few more: INF,
+NaN, and denormalized values.
+
+VAX floating-point originates with PDP-11 floating-point from 1970 (which
+defined the f and d formats for 32-bit and 64-bit respectively).  The VAX almost
+immediately gained another 64-bit format (g) because the original one from the
+PDP-11 couldn't handle numbers very far from 0 or very close to it -- the
+first word of both the PDP-11 formats were identical.  The new 64-bit format
+allocated more bits to the exponent to solve the issue.
+
+VAX floating-point can take the value "reserved operand" on top of the normal
+values.  Any attempt to operate on such a value -- even just an innocent MOV --
+will cause an exception.
+
+The only floating-point instructions are MOV, MNEG, ADD/SUB/MUL/DIV/CMP/TST,
+CVT, ACB, EMOD, and POLY.  MOV is a move instruction that tests for the "reserved
+operand" value, MNEG flips the sign, TST is CMP with 0.0, CVT converts between
+floating-point formats and between integers and floating-point.
+ACB is "add-compare-branch" for loop constructs with floating-point.
+
+EMOD and POLY are both used to implement other floating-point functions such as
+sin/cos/tan and exp.
+
+EMOD does range reduction by multiplying a floating-point number with an extra
+8 bits of precision with another floating-point number and splitting the result
+into an integer (signed 32-bit) and a fractional part (floating-point).
+
+POLY calculates a the value of a multi-term polynomial (used to approximate
+various functions) with an internal high-precision intermediary sum.  So,
+basically an automated floating-point FMAC operation.
+
+The much-maligned POLY isn't actually particularly complicated to implement,
+especially not at a time when almost all floating-point was microcoded, anyway.
+
+
+
+Vectors, a late and misguided extension
+---
+In the mid-80's, many people thought that the road to really fast number
+crunching required vectors.  They started working on it midway through the
+development of RIGEL (around 1985/1986), which was shipped in 1986.
+In the end, only RIGEL and VAX 9000 ever supported vectors.
+MARIAH and NVAX didn't.
+
+Vectors did give (up to) twice as good benchmark numbers for number crunching
+tests on VAX 9000 but it did complicate everything and wasn't useful at all to
+normal floating-point code.
+
+DEC managed to develop software that could emulate vector instructions on other
+machines.  It was slow, but it worked.  Very nice for software that only occasionally
+used the vector instructions.
+
+The main *actual* benefit of the vector extension probably was to provide more
+floating-point registers.
+
+A different extension that would probably have worked better would be to have
+an extra set of floating-point registers that could be addressed with its own
+set of MOV/ADD/SUB/MUL/DIV/CMP/TST instructions + a version of MOV that could
+move values between the GPRs and floating-point registers.  It would only need
+to support the 'f' and 'g' formats, not the old 'd' format.  Support for single/
+double precision IEEE could be added later.
+
+CVT, ACB, EMOD, POLY would not be necessary.  Conversions (rare) could be done
+in the GPRs, ACB could also use a GPR (and I expect it to be rare), EMOD and
+POLY are used in functions that only handle a few floating-point values at a
+time, so they can also just use the GPRs.
+
+I don't know whether these "FPRs" should be 32-bit (and use pairs like normal
+VAX floating-point for 64-bit values), or be natural 64-bit registers.  The
+former would fit in more naturally with the rest of the architecture (and be
+cheaper) but the latter would probably work better.
+
+Even if only the first 8 FPRs were available on the first implementations, it
+would probably work great.
+
+
+
+Interrupts, exceptions
+---
+Prioritized.  Masking, status, prioritization built into the architecture (that
+was probably not necessary).
+
+Needs both PSL (privileged and non-privileged parts) + several Internal Processor
+Registers + the vectors in the System Control Blocks.
+
+There are too many different kinds of traps/exceptions.
+
+Software interrupts that are *asynchronous*.  VMS can't work without them, used
+for ASRs (asynchronous response routines) that are used all over the operating
+system.
+
+
+
+
+Virtual memory
+---
+512 bytes.  P0, P1, S0.  Flat tables w/ len.  No S1.
+Various pte formats.  Up to 34-bit phys addr by the end.
+privilege levels, R/W/X checks.
+
+translation can be turned off.
+
+Internal things like system control block, process control block, S0 lookup use
+untranslated addresses, always.
+
+Access into the P0/P1 tables use S0 translation.
+
+
+
+
+Privilege levels
+---
+0/1/2/3
+
+KSP/../USP.
+
+Current privilege level in PSL (?)
+Each pte has an access mode: privilege + R/W/X.
+
+CHMx to switch mode, REI to switch back.  CHMx (and REI?) only allowed in S0.
+User applications called system code with CALLS/CALLG instructions to entry
+points in S0 region which would then execute a CHMx instruction.
+
+
+
+Instruction set, overview
+---
+<opcode> [operand]{0..6}
+
+almost all operands are general, have an opspec.
+
+branches only exception.
+
+optype, access type, data type: ab, aw, al, aq, rb/rw/rl/rq/rf/rd/rg, ...
+
+6-bit immediates
+Rn
+[Rn], [--Rn], [Rn++], ...
+long immediates: b/w/l/q/f/d/g  (and o/h)
+
+bb, bw
+
+bitfields, vb
+
+implied operands
+
+many memory references possible per instruction -- some have claimed that makes
+it difficult to implement (and difficult to write systems software for). I disagree.
+It doesn't seem particularly hard, actually.
+
+
+Three-address version of ADD, reads two (byte) values and writes their (byte) sum:
+
+  ADDB3   rb, rb, wb
+  ADDB3   src1.rb, src2.rb, dst.wb
+
+Two-address version of ADD, shows a "modify" operand at the end:
+
+  ADDB2   rb, mb
+  ADDB2   src.rb, sum.mb
+
+Implied operands:
+
+  EXTV    pos.rl, len.rb, base.vb, {field.r}, dst.wl
+
+  Extracts bits from a bitfield that begins at address base, starts pos bits
+  into the bitfield and is len bits wide.  The extracted bits are written to
+  dst.
+
+All write and modify operands are always at the end of the operand list.
+
+
+
+Instructions themselves
+---
+Prefixes
+XFC
+breakpoint
+reserved bytes
+"defined undefined" opcodes -- x86 has something similar.
+
+
+
+Operands
+---
+
+
+
+Registers
+---
+PSL, 4-bit flags
+
+16 GPRs
+
+PC (r15), operands specifically spec'ed so that operand decoding can be implemented
+sequentially (one byte at a time) and in parallel (and/or several bytes at a time).
+
+Also spec'ed so that the PC can never be written to with normal instructions --
+only interrupts/exceptions and explicit control transfer instructions can write
+to the PC.
+
+Also spec'ed so that the only way normal instructions can read the PC is indirectly,
+in the form of PC relative addressing, which gives us immediates (8F), addresses
+(9F), and byte/word/long relative and byte/word/long relative deferred.
+
+The decoder might as well do the addition of the PC and displacement for the
+relative addressing modes (possibly combined with deferred and indexed).
+
+
+
+Buses
+---
+Unibus, PDP-11 compatibility, 1969
+Q22, PDP-11 (LSI-11), year?
+Massbus, PDP-10, PDP-11, 1970's	
+VAXBI, VAX 6000/8000/9000
+XMI
+TURBOchannel
+
+https://en.wikipedia.org/wiki/Unibus
+https://en.wikipedia.org/wiki/Q-Bus
+https://en.wikipedia.org/wiki/Massbus
+https://en.wikipedia.org/wiki/VAXBI_Bus
+https://en.wikipedia.org/wiki/TURBOchannel
+	
+
+bus transaction, DMA (devices can write to/from memory), interlocked
+I/O coherent caches
+
+unaligned reads/writes  (uncached, that is, in I/O space)
+aligned reads/writes -- byte lanes
+
+interlocked access, 8/16/32 bits, aligned, interlocking grain
+  ADAWI 			rmw, 2 bytes, aligned
+  BBCCI/BBSSI 			rmw, 1 byte
+  INSQHI/INSQTI/REMQHI/REMQTI	rmw, 4 bytes, aligned (more than one word?)
+
+
+block transfers
+interrupted transfers?  max legal transfer length?
+
+interrupts
+
+synchronous bus (so interrupts can use simple wires, don't have to use packets
+as in modern PCI).
+
+CVAX had a nice bus, defined around 1987.
+
+8-bit I/O read
+8-bit I/O write
+16-bit I/O read
+16-bit I/O write
+32-bit I/O read
+32-bit I/O write
+64-bit I/O read
+64-bit I/O write
+
+MOVQ, MOVD/MOVG, ASHQ, ADDD/SUBD/MULD/DIVD, ADDG/SUBG/MULG/DIVG
+
+
+Devices
+---
+Autoconfiguration?
+
+
+
+Dark corners
+---
+
+CMPV/CMPZV, EXTV/EXTZV, FFS/FFC
+
+the field is extracted as soon as the (pos,size,basereg) triple is know, before
+the last operand is handled.  This matters if the last operand uses an autoinc/
+dec addressing mode using the same register as one of the registers the field
+is in.
+Extracting the field afterwards would then extract the wrong bit pattern.
+
+Earlier VAX implementations naturally did the right thing, but the CVAX doesn't
+because it handles all operands before the instruction itself is handled.
+Therefore the microcode for these instructions start with compensation code
+for this case.
+
+	CMPV #0, #32, R0, (R0)+
+	CMPZV #0, #32, R0, (R0)+
+	EXTV #0, #32, R0, (R0)+
+	EXTZV #0, #32, R0, (R0)+
+	FFS #0, #32, R0, (R0)+
+	FFC #0, #32, R0, (R0)+
+
+
+EDIV
+
+Has a similar problem with inc/dec address mode as CMPV/CMPZ/EXTV/EXTZV/FFS/FFC.
+(depending on how the implementation handles it -- see the Raven microcode)
+
+
+
+CMPV/CMPZV, EXTV/EXTZV, FFS/FFC, INSV
+
+What happens if the field is in a register?  If it spills over to the next
+register AND that register is r15, you get an exception.  But what if it is
+completely contained within the first register and that register is r14?
+
+This is "unpredictable".  The ARM doesn't say so but the CVAX specification does.
+
+The ts10 emulator raises an exception if the field is in r15 or spills over into
+r15.
+
+SimH does the same.  I think the CVAX microarchitecture does the same if the
+microcode attempts to read r15 as if it were a normal register -- which result
+in identical behaviour to ts10 and SimH.
+
+
+
+CMPV/CMPZV, EXTV/EXTZV, FFS/FFC
+
+They are not allowed to take bit fields from short (6-bit) immediates.  They
+are apparently allowed to take bit fields from long immediates.  But what if
+that immediate is too short to contain the field?  Does it get automatically
+zero extended somehow?  I think this is a case the VAX designers/implementers
+missed.  I have found no reference to it in the CVAX specification document or
+in the architectural reference manual.
+
+I think it *ought* to be "unpredictable" and I think most implementations
+blissfully pretend immediates were just normal bitfields in memory that just
+happened to be embedded inside instructions.  I believe most of them would
+read data outside the immediate fields, other parts of the instruction or even
+other instructions.
+
+
+INSV
+
+Can it write a field to a long immediate?  Can it *overflow* the long immediate?
+
+This is not a case that I've seen mentioned in the ARM, the CVAX specification,
+or the CVAX microcode.
+
+I think it ought to be "unpredictable".  I also think most implementations would
+blissfully write to the immediate field -- or to later bytes, thus overwriting
+other instructions -- as if the immediate field was just a normal bitfield in
+memory.
+
+
+
+MOVQ
+
+It moves a 64-bit entity on a 32-bit machine and sets the Z flag based on the
+entire value.  Breaking the move into 2 32-bit moves is not hard but one has to
+be careful to set the Z flag based on BOTH 32-bit parts.
+
+There might also be tricky case when moving from one register pair to another
+if they overlap a bit:
+
+  MOVQ  r0, r1		; (r1,r0) --> (r2,r1)
+
+If it is implemented naïvely with a 32-bit datapath it would be:
+
+  µmov  r0, r1		; oops!  overwrites r1
+  µmov  r1, r2		; now r2 = r1 = r0!
+
+In practice, there is normally no problem because normal VAX implementations
+execute MOVQ in the following three phases:
+ 1) microcode decodes the first operand (r0) and copies r0 and r1 into internal
+    registers
+ 2) microcode decodes the second operand (r1) and decides it doesn't need to
+    do anything since it is not an address operand
+ 3) microcode copies the two internal registers to two other internal registers
+ 4) microcode decodes the second operand again and copies the values in the
+    last two internal registers over to r1 and r2
+
+The NVAX is somewhat different, because steps 1, 2, and 4 are performed by
+hardware and not microcde.  Step 3 is pretty much the same, though.
+
+If I ever write a VAX implementation that has a smart decoder which recognizes
+immediate and register operands and skips microcode for them, then I will have
+to be careful to avoid this trap.
+
+In that case, it can be solved by:
+ - using temporary registers and extra µops
+ - decoding to two different 2-µop sequences, depending on the overlap:
+    MOVQ  r0, r1	; (r1,r0) --> (r2,r1)
+
+    µmov  r1, r2	; r1 is now free to be overwritten (most significant first)
+    µmov  r0, r1	; correct!
+
+
+    MOVQ  r1, r0	; (r2,r1) --> (r1,r0)
+
+    µmov  r1, r0	; r1 is now free to be overwritten (least significant first)
+    µmov  r2, r1	; correct!
+ - using a 64-bit datapath
+
+
+
+
+ASHQ
+
+Setting flags, especially the Z flag...
+
+
+Addressing modes
+ab/aw/al/aq apparently accept (long) immediate operands!
+
+
+Bit fields
+Bit field operands are (mostly) address operands in disguise.  That means that
+they also accept (long) immediate operands!
+
+
+On some VAX machines, even modify (mb/mw/ml/mq/...) and write (wb/ww/wl/wq/...)
+work with immediate operands!  Yes, that will modify the immediate field so if
+the instruction is run in a loop it will be different the next time around!
+
+This is, thankfully, not a requirement of the architecture.  It is officially
+"unpredictable" what happens if you use a (long) immediate as a modify or write
+operand.
+
+It ought to be "unpredictable" as well if done with the INSV instruction (that
+writes a value to a bitfield) but it isn't documented as such.
+
+
+
+POLY
+
+Many VAX implementations got these instructions wrong -- in different ways.
+DEC "fixed" this by amending the specifications and by coding around it with
+clever code in the math libraries.
+
+
+
+Literature
+---
+https://esolangs.org/wiki/User:Ian/Computer_architectures
+
+"Ian" has lots of interesting observations but there are many minor inaccuracies.
+
+
+
+https://0xabad1dea.github.io/vaxhax-0xabad1dea.txt
+
+CVAX microcode
+
+SimH
+
+ts10
+
+
+
+VAX ARM, 1977
+
+VAX std32, Jan 1990
+
+
+CVAX Specification -- cvaxspec.txt
+
+CVAX Design -- cvaxdesign.txt
+
+CVAX CPU Chip Microcode Documentation -- cvaxudoc.txt
+
+VAX Processor Charts, vax_proc.txt, 2000
+
+

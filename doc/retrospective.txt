@@ -1,0 +1,483 @@
+Retrospective
+----
+
+
+Some things turned out to be either exceptionally hard or time consuming.
+
+Some decisions turned out to be very good.  Some turned out to be bad.
+
+
+ ---
+
+Decoding (and encoding and validating) operands turned out to be really, really
+hard.  Almost all the difficulty lay in understanding the operand specifiers,
+not in actually implementing them once they were understood.
+
+I made the huge mistake of not playing around with VAX assembler before I
+delved into the project.  I have actually still not used the VAX macro
+assembler!
+
+Once I understood the operands, it was not that hard or time consuming to
+create a table-based handling of them using a code generator and a table in a
+text file.
+
+ ---
+
+Operands and addressing modes...
+
+Figuring out the µcode to handle the addressing modes was again not too hard,
+once I actually understood them.
+
+Figuring out how to piece together all the necessary µcode fragments to handle
+all the operands for an instruction was kinda hard -- again, because I didn't
+really understand VAX operands well enough before I started.
+
+The problem was that there is a fixed list of allowed/expected operands for each
+instruction.  This list specifies the natural size of each operand, and whether
+it is read/write/modify/address/bitfield.
+
+Once I figured out how it was supposed to work, it wasn't hard to identify
+about a dozen different µcode fragment tables that would be enough to support
+all the instructions.
+
+Again, partly table-driven, partly auto-generated code.
+
+ ---
+
+How to handle quads...
+
+There's about a handful of quad instructions that operate on 64 bits.
+
+The natural microarchitecture for a VAX implementation uses a datapath that is
+naturally 32-bit, except for a 64-bit funnel shifter.
+
+So how are quads handled?
+
+I originally thought the best way was to have µops of a width of 64 to naturally
+read/write two registers at a time, and to have the ALU use 64 bits.
+
+That was a dumb idea.
+
+I use two 'ld'/'st' µops to read/write quads from/to memory, and two 'mov'
+µops to read/write two consecutive registers, and two µops to set flags for
+MOVQ.
+
+MOVQ has to set the Z flag based on all 64 bits.  A normal 'mov' µop will always
+set Z based on just the 8/16/32 bits it operates on.  An extra 'mov-' µop is
+used that sets the Z flag based on the 8/16/32 bits AND the previous value of
+the Z flag.
+
+ ---
+
+Partial register writes...
+
+MOVB/W, ADDB/W, etc. only write to the lower 8/16 bits of registers.
+The upper 24/16 bits are untouched.
+
+I originally thought that should be handled by always reading 32 bits and
+always writing 32 bits back to the register file.  The ALU would then only
+operate on the lower 8/16 bits and the upper 24/16 bits would be untouched (or
+merged in from the original input).
+
+This was a dumb idea.  It breaks down because the instructions are basically
+3-address instructions:
+
+  ADDB	r0, r1, r2	; leaves upper 24 bits of r2 untouched
+
+Implementing this method in the ALU would require not two but *three* sources.
+
+The correct and obvious way to handle it is to only have two sources but allow
+partial register writes to the register file.
+
+ ---
+
+Flag handling for partial-width ALU ops...
+
+The NZVC flags are set based on the size of the operation.  The first 2-3 sketches
+of ALU code were very complex and still didn't handle this correctly.
+
+The correct way -- which is simple and efficient -- is FIXME
+
+ ---
+
+Sign/zero extension for partial-width ALU ops and disps...
+
+I had thought myself into a corner where I thought this was a big problem.
+
+I also had envisioned a complex system for handling either sign-extension or
+zero-extension or merging (see 'Partial register writes' above) as a side effect
+of every ALU operation.  The biggest problem was the data conversion instructions
+that expanded from B to W/L and W to L, because they involved *two* data widths
+instead of one.
+
+The easy way is:
+ - to have the ALU generate whatever it likes for the upper 24/16 bits for
+   short widths
+ - to use partial-width register writes
+ - to have explicit zero/sign extension µops, one for each of the 6 possibilities
+ - to have sign-extension of displacements in operands happen automatically
+   in the decoder before the µcode sees them
+ - to have zero-extension of lit6 immediates happen automatically in the
+   decoder before the µcode sees them
+
+ ---
+
+Table-driven µops (uops.spec, uasm.pl, dis-uop.h).
+
+Very good decision even if it took close to a week to write/rewrite it.
+
+Saved some lines in the new uasm.pl relative to the old one but only a bit
+less than 200.  I had hoped for 300.
+
+ ---
+
+Testing...
+
+Turns out to work great to pull out crucial pieces to include files.
+Make sure the pieces are applicative (state-less, depending only on parameters
+passed in, don't set any file-scope variables).
+
+Use a harness to test them -- plus to actually develop all the pieces, as this
+is a lot easier without all the other code drowning it out.
+
+Use built-in tables for testing + allow test vector input from stdin.
+
+American Fuzzy Lop for fuzz testing.  Requires special compilation.  Runs
+a single test vector at a time, passed through stdin.  There's a trick to
+speed it up by not *actually* forking/exec'ing the program once per test
+vector.
+
+American Fuzzy Lop needs a good set of test vectors to start with -- give each
+test harness a command-line option to simply dump out the table with the
+internal tests to a set of files in a subdirectory.
+
+AFL is fantastic -- but it hasn't actually found any bugs for me, yet.
+Actually writing tests and test harness did work very well for finding a few
+bugs and for polishing the code to a nice state.
+
+ ---
+
+Floating-point...
+
+The VAX has its own floating-point formats.  Took some time to understand them.
+I'm not very good at IEEE floating-point, either, so this code is NOT easy to
+write for me.
+
+Figuring out how lit6 immediate operates get expand to f/d/g/h floating-point
+values took some time.
+
+I don't actually have to implement EMOD/POLY, since it was typical to emulate
+them in software (because the hardware implementations were buggy/different from
+each other and the spec + they required unusual data paths and tricks).
+
+I tried at first to implement my own conversion routines between VAX fp and
+decimal (ASCII) representation.  I also implemented my own 128-bit bigint
+routines for the purpose.
+
+It turns out that I don't need to, at least not yet.  There is a wonderful
+library called 'mpfr' (multi-precision floating-point routines) which lets
+me easily work with any size IEEE-like floating-poiint operands.  VAX fp is
+sufficiently IEEE-like to make it work.  VAX fp doesn't support denorms, and
+only one NaN and it only has one rounding mode -- apart from that, it is basically
+IEEE (only with different exp/frac sizes).
+
+Once I get to the microcode support for floating-point, I will have to understand
+it well enough to actually implement VAX fp.  I expect to keep using mpfr in
+assembler/disassembler.
+
+Not using mpfr straight away cost me maybe a week of work :(
+
+And it's not like it was cheap to use mpfr, either!
+The documentation is not super great, for example.
+
+Lots of bit fiddling to convert back and forth between VAX f/d/g/h and mpfr -- 
+but it would have been as bad or worse without mpfr.
+
+Testing the code was slightly tricky: how do I test that two values (before and
+after round-trip) are less than 1ulp apart?  C99 has a function nextafter()
+for purposes like that.  Mpfr also supports it, but the problem is that it has
+to operate on VAX and not IEEE or mpfr.  Again, more bitfiddling and corner
+cases.
+
+Implementing (and testing) nextafter() was surprisingly easy.  By that time, I
+guess I was simply becoming better at VAX fp (and fp in general).  The d/g/h
+versions of nextafter() weren't tested directly but they were tested tens and
+hundreds of millions of times with random input through the test of d/g/h
+round-tripping to/from decimal strings.
+
+I found a single fp value that wouldn't round-trip, namely 0xFFFF_FFFF in the
+f format.  It converted fine to a decimal string but that string couldn't be
+converted back (I think maybe because mpfr rounded up when it shouldn't?).
+
+All other values either came back the same or within 1 ulp for all fp formats.
+
+Was it worth the hassle?  Probably.  Was it worth giving asm/dis great fp
+support before the sim could really run anything?  Probably not.
+
+I learned a lot, though.
+
+ ---
+
+Bitfields...
+
+Bitfields can be stored in either registers or memory.  Bitfield operands are
+a lot like 'address' operands, except that they can be used on registers and
+immediates (not 6-bit literals).
+
+Sometimes they operate on 1 register, sometimes on 2.  Took some time to puzzle
+out what happened if a bitfield instruction tried to operate on r14 with a pos/
+length that would keep the bitfield entirely within r14.  Would that be allowed
+or not, since it didn't *actually* use r15?  It turns out that it is 'UNPREDICTABLE'
+so I decided the right thing to do was to always raise an exception.
+
+Bitfields can also use immediates -- they are treated as an in-memory bitfield
+that starts on the same address as the immediate inside the code stream.
+Pos/len can be set to operate on a field somewhere outside of the immediate...
+Yes, INSV can write to the immediate -- or to somewhere else in the code!
+
+ ---
+
+Interrupts/exceptions
+
+Very complicated and a very large subsystem in the VAX architecture.
+
+I don't quite understand it yet.  I don't expect any really big problems but
+there are some issues with
+
+ ---
+
+Microcode branches (arch/µ flag sets)...
+
+The microarchitecture has to sets of NZVC flags, one is the architectural set
+(part of the transactional state together with the GPRs), the other is the
+microcode set.
+
+All µops that read/write flags state which set they use.
+
+There is a single µop that does conditional branching (+ call/ret and exceptions).
+Its condition code is encoding in the same way is in the VAX conditional
+instructions.
+
+ ---
+
+Handling normal vs abnormal instruction execution in microcode
+
+VAX instructions are turned into a list of µcode fragments that are expanded
+(various fields filled in with information from the decoder) and passed down
+the pipeline where the µops are executed one by one.
+
+But what if there are branches in the µcode?  The code branched to should be
+passed down the pipeline before any of the post fragments.  Only once the
+exe phase is complete should the post fragments be run.
+
+What if something goes wrong?  An explicitly raised exception ('exc' µop) or
+an implicitly raised one ('reserved addressing mode' from the decoder or XXXX
+during execution of xxx µop) or a microexception (TLB miss)?
+
+And what happens to the register/flag state in case of exceptions?
+
+Switch the streaming of µops into the pipeline to a new mode where the post
+phase is delayed.  The new mode ends with a specific choice to either continue
+with the current working version of the state and execution of µops in the
+exe phase, or a choice to rollback, and start decoding a new VAX instruction.
+
+The decoder reads µops and passes them down the pipeline until a µop with the
+stop bit is set (the instruction just before a '---' line in the µcode source).
+This stop bit can come anywhere in the exe phase: after one or more µops of
+completely straight-line code or after branches and loops.
+
+Do NOT put a terminator after µbranches!
+
+If there has been no exception, a stop signal will automatically result in a
+commit of the architectural state after the last µop of the last post fragment
+(if any).
+
+If there has been an exception, it is up to the exception handling µcode to
+commit/rollback.  Neither will result in any changes to the µcode control flow,
+they will only affect the architectural state.
+
+If there has been an exception, so the µflow stops at the first terminated
+µop (the first one with a '---' terminator after it).
+
+'commit'	commit architectural state
+'rollback'	rollback architectural state
+
+'call'		µcode call
+'ret'		µcode return
+
+'exc'		encoded as 'bcc' but with a bit set in the target µaddress.
+		this is how conditions are explicitly raised.
+		That means it takes a condition code, just like 'bcc', which
+		can be 'always' as with 'bcc'.
+		FIXME does it make sense to allow the 'call'/'ret'/'<cc>' for
+		'exc'?
+
+'mbz'		check that certain bits are zero, raise an exception if not.
+		(should probably be removed)
+
+'bcc'		µcode branch based on flags -- the condition is encoded in 4
+		bits using the same encoding that VAX instructions use.
+		There are some unused numbers in that encoding which we overload
+		to encode 'call', 'ret', and unconditional branch.
+
+'stop'		make the emulator stop
+
+
+Figuring all this out took some time -- at least a week in the beginning of the
+project.  The details were revisited many times and were not completely fleshed
+out until the beginning of March 2018.
+
+FIXME the above almost makes sense -- still needs a little editing and some
+      examples.
+FIXME microexceptions (TLB miss) -- can cause explicit exceptions in case of
+      access violations?  Or does it just load the TLB entry and resume, where
+      upon the 'ld'/'st' µops in the normal flow cause the access violation
+      exception?  Probably the latter.  Seems cleaner.
+FIXME implicit exceptions
+
+ ---
+
+Makefile usability
+
+Very satisfied with the short and simple makefile.  Very satisfied that the
+programs are so easy to compile: one main file + maybe some include files.
+Except for shared.c.
+
+That means there's not much that needs to be compiled so building the project
+takes very few compiler invocations so there's no need for the pretty printing
+macro tricks we can play with GNU Make (à la Linux' kbuild).
+
+There's also no need for the automatic dependency checking macro I've used in
+many previous projects.
+
+Very satisfied with 'make' = 'make help'.
+
+Very satisfied with 'make xxx.cov', 'make cov'.
+
+Would be nice if the makefile automatically checked for the existence of
+vax-linux-gcc/vax-linux-objdump.
+
+Would be nice if the makefile automatically checkef for American Fuzzy Lop.
+
+FIXME: perhaps src/shared.c was a dumb idea?  Put it all in src/shared.h?
+
+FIXME: test-op.sh?  cov.sh?   run-test-op.sh?  test-op-afl.sh?  test.sh?
+
+ ---
+
+Directory structure -- source code readability
+
+Very happy that all the code (except for Makefile and -- temporarily? -- some
+shell scripts) live in src/.
+
+afl-*/ are temporary directories related to American Fuzzy Lop.
+
+ ---
+
+Testing/avoiding errors...
+
+Unit tests are great!  Also serve as documentation.
+  Unit tests are based on test harnesses -- separate C files -- that include
+  whatever component(s) they want to test.
+
+  There's no need for special naming tricks for normal unit tests.
+
+American Fuzzy Lop is absolutely fantastic!
+  It does need a set of good test vectors as seed.
+  Turned out to be a very good idea to have each program create its own
+  test vector files.
+
+  It also needs 2-3 subdirectories for each test: one for the seeding test
+  vectors, one for the output, and one for synchronization if parallel fuzzing
+  is used.
+
+  It needs specially compiled programs (preferably with sanitizers enabled).
+
+  It's a good idea if those specially compiled programs have names that
+  match a fixed template -- such as an 'afl-' prefix or a '.afl' suffix.
+
+
+valgrind is absolutely fantastic!
+  probably even better (but slower) if combined with sanitizers.
+
+gcc/clang sanitizers are absolutely fantastic!
+
+  -fsanitize=undefined
+  -fsanitize=undefined,leak
+  -fsanitize=...
+
+
+compiler warnings are absolutely fantastic!
+
+  -W -Wall
+
+  -Wall enables a whole bunch of warnings -- but not actually all of them
+  -W    enables some more warnings
+
+  -W and -Wall individually enable a bunch of warnings.  The two sets overlap
+  somewhat but not entirely.  Asking for both enables an extra bonus set of
+  warnings on top of the two individual sets.  Yes, it does!
+
+  -W... extra warnings I would like to use...
+
+
+Disable warnings:
+
+  int f(int x, int y)
+  {
+      (void) x; /* don't complain about unused x */
+
+      return y*2;
+  }
+
+
+  /* Some of the sanitizers check for unsigned integer overflow, which is
+     completely legal but usually a sign of a bug.
+    
+     Switch it off inside this function because we know what we're doing.
+   */
+  void f(...) __attribute__((no_sanitize("unsigned-integer-overflow")));
+  void f(...)
+  {
+      ...
+  }
+
+
+  /* The function 'f' might be unused, depending on how the file gets compiled.
+     Don't complain about it.
+   */
+  void f(...) __attribute__((unused));
+  void f(...)
+  {
+      ...
+  }
+
+
+C99 has a great, underused feature:
+
+  int main(int argc, char *argv[argc])
+
+  ... f(uint8_t b[MAX_OPLEN], ...)
+
+  This tells the compiler how big the index into argv[], b[] is allowed to be
+  inside main/f.  This makes it easy for the sanitizers to insert range checks.
+
+C89 has struct passing, which lets us sorta kinda return strings:
+
+  struct str_ret {
+      char  str[10];
+  };
+
+  /* this is thread-safe/signal-safe + no need to free string + str_ret() can be
+     used several times in a printf() function call, for example.
+   */
+  struct str_ret f(int x)
+  {
+      struct str_ret  ret;
+
+      sprintf(ret.str, "...", ...);
+      return ret;
+  }
+
+
+

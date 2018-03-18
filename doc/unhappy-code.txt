@@ -1,0 +1,232 @@
+Unhappy Code
+------------
+
+There are always parts of a large codebase that one is not quite satisfied with.
+Sometimes that's true even for quite small code.
+
+Some of these have been fixed now.
+
+------------------------------------------------------------------------------
+
+
+Makefile, AFL
+---
+Tab completion doesn't work well with the current choice of names for AFL related
+directories and AFL test programs.
+
+The problem is too many shared prefixes:
+  afl/
+  afl-xxxx
+
+  afl/big-int/...
+  afl/big-int-out/...
+
+  afl/op-decode/...
+  afl/op-decode-out/...
+  afl/op-asm/...
+  afl/op-asm-out/...
+
+Would afl-in/, afl-out/ be better?
+(a<tab>i, a<tab>o, a<tab>t for afl-in/, afl-out/, afl-test-xxxx respectively)
+
+
+
+Address translation, unaligned access, I/O
+---
+The code is incomplete and I'm not happy about where the lines go between the
+abstraction layers.
+
+
+
+Parser
+---
+Generally very happy with it -- but it is probably a lot slower than necessary.
+Also tricky to use correctly in some cases with transactions -- although I
+don't think it is harder to use than a traditional recursive descent parser or
+a recursive descent parser with setjmp/longjmp.
+
+It is mainly the operand handler in the assembler that I'm unhappy about.
+
+The hand-written parsers for various integers/addresses, and for the .ctrl file
+used by the disassembler are plenty good enough as is.
+
+The machine-generated parsers could use a tree-like parsing without too much
+difficulty and that would let me keep the low-level parser code exactly the
+same.
+
+
+
+Some of the Perl code is clunky and/or long-winded
+---
+Why is uasm.pl so long, for example?
+Should the µops really be specified in that file or in another file, such as
+src/uops.spec?
+
+There are Perl features I don't use -- automatic handling of first/non-first,
+last/non-last iterations of a loop, for example.
+
+Hashes, references, and arrays -- I'm not really fluent in Perl data structures
+and it shows.
+
+Very repetitive.  This is on purpose.  "Flat", concrete code is easier to write
+and read in unfamiliar languages and for unfamiliar domains where one is unsure
+about the right way to "carve nature at its joints".
+
+No CPAN libraries.  This is intentional.  I have no doubt that using the right
+ones would save me time, code, and make my Perl scripts faster.  I have absolultely
+no idea what those CPAN modules would be, though.  So not going down that
+rabbithole is a good decision.  It also cuts down the dependencies of the project.
+
+It would be really nice if uasm.pl could be made smaller, perhaps by moving
+the µops to src/uops.spec.
+
+It would be nice if operands.pl could be shorter.  There is so much duplicate
+code.  This is not something I should work on until sometime after asm/dis/sim
+are all up and running.
+
+instr.pl is longer than I would prefer but it is really easy to read.
+
+Perl regexes -- many of them end up being too long/terse.  Should probably look
+into using /x and some whitespcae.
+
+
+
+Addressing modes
+---
+The microcode is involved in all addressing modes -- this is slow.
+
+Some of the address generation is even slower because there is no dedicated
+address generation unit in the "Mark 1" ideal microarchitecture.  It also forces
+the microcode to use a 'readpc' µop with all the synchronization problems that
+entails.
+
+
+
+AFL testing
+---
+I am not happy about the way AFL testing is conducted by the Makefile at the
+moment.  I'm not entirely unhappy, either.  I just think I can do better.
+
+I'm still new to AFL and fuzz testing in practice.  I'm sure it'll be better
+in a few weeks.
+
+The test programs tend to use lots of invocations to output the test corpus.
+That should clearly be cut down to just one.
+
+The way the command line is handled for the AFL tests is clunky and long.
+The output code should say clearly what directories it writes to -- but not
+the individual files.
+
+
+
+Operand decoding/encoding is too slow
+---
+Everything is matched linearly in order.
+
+This is slooow.
+
+Should switch to hierarchical decode for dis/sim/val and hiearchical parse for
+asm at some point.
+
+Wait until asm/dis/sim are all up and running.
+
+
+
+Pre/exe/post communication
+---
+Microcode in the various phases need to communicate.  They do that using
+internal registers (p1..p7, e1..e3).
+
+I hope there is a prettier way of handling this.
+
+It would be nice if I found a way that was easy to convert to using a smart
+decoder (where the pre phase is skipped/merged into the exe phase and/or the
+post phase is skipped/merged into the exe phase for simple addressing modes).
+
+
+
+ALU, flags
+---
+The first two drafts of the ALU/flags code were clunky and long and too intimate
+with the internals of other parts of the simulator.
+
+The third draft is much nicer.  It is completely applicative (state-less) and
+doesn't know a thing about the rest of the simulator, except for some of the
+µops and of course the registers/flags.
+
+
+
+------------------------------------------------------------------------------
+
+(Mostly) fixed issues
+
+
+
+Operand decoding
+---
+I had written code to decode operands for the disassembler and the simulator
+but it was very ugly and long.  It was also incomplete -- some of the addressing
+modes weren't actually there -- and buggy -- some of the register checks were
+incorrect.  I was about to implement similar code (but in reverse) for the
+assembler...
+
+Then I saw the light and switched to a short and simple specification for all
+addressing modes for asm/dis/sim and validation (operands.spec) and a generator
+that converts it to code (operands.pl).
+
+I'm not happy about the code quality in operands.pl but the decision was a really
+great one.  The old way was simply not sustainable.
+
+
+
+
+Floating-point conversions (to/from base 10), mpfr, rounding
+---
+All floating-point values -- except FFFF_FFFF for f type -- round-trip with at
+most 1 ulp deviation.  Cut that be reduced to 0 ulp with proper rounding?
+Maybe.  Possibly.  I don't understand fp well enough to say but it seems
+likely.
+
+Going with mpfr was a very, very good decision, btw.
+
+
+
+µops
+---
+The definition lives in uasm.pl in a distributed way -- it lives in an array at
+the top of the file and in lots of regexes and regex handling code ($1, $2, ...)
+in a huge "switch" statement... AND in some code that writes the enum uop to
+stdin and then some code that writes the ucode[] array.
+
+At the same time, this must be synchronized with code in dis-uop.h and in sim.c.
+Possibly also with code in alu.h/test-alu.c.
+
+This is not okay :(
+
+[I wrote an abstract spec of the uops in src/uops.spec -- everything is in one
+place now.  Rewrote uasm.pl almost from scratch so it uses src/uops.spec + with
+better Perl knowledge.  It is much cleaner now.  src/dis-uop.h is now table-
+driven (using tables generated by uasm.pl).]
+
+
+
+µops, microarchitecture
+---
+Took me forever to figure out what µops I wanted.  Most of it was easy enough
+but I stalled for an eternity on:
+ - partial-width operations and zero/sign extension
+ - flags (which µops set the flags how?  did I need several versions of each,
+   with different flag setting?)
+ - 64-bit operations 
+ - shift operations -- how realistic should they be?
+ - mul/div operations -- how realistic should they be?
+ - MOVQ takes two µops now that I've decided on a realistic 32-bit datapath.
+   In order to get the flags right, there needs to be a second version of the
+   mov µop that sets the Z flag based on the 32-bit value AND the previous
+   state of the Z flag.
+ - general cleanup -- got rid of 'mbz'
+
+The last misunderstandings/dumb ideas were cleaned up while writing uops.spec
+for the table-driven version of uasm.pl and dis-uop.h.
+
+

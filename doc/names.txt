@@ -1,0 +1,45 @@
+Names and abbreviations
+-------------------------------------------------------------------------------
+
+
+It's a simulator, not an emulator (we are not that good).
+
+VAX instruction mnemonics are always uppercase.  µcode instruction mnemonics
+are always lowercase.
+
+datalen => width
+
+µinstr, µop
+
+ROM µinstr, templates, can be compressed a lot
+
+exe µinstr, only refer to actual immediates, actual registers, actual condition
+  codes, etc.  Expected to be wider than ROM µinstr.
+
+flow
+flow stop
+
+template instructions
+
+pre/core/post  phases
+
+fragment
+
+operand type (rb/rw/rl/rq, mw, aq, wg, bb, ...)  (optype)
+
+operand descriptor (5x, 8F, ...)  (opdesc)
+
+operand class (I/R/M)  (opclass)
+
+operand decoding -- machine generated code based on src/operands.txt
+
+
+operand group -- a set of oppairs that share the same fragment table
+
+fragment table -- pre/post for I/R/M, what fragment to use
+
+pre_n, core_n -- registers written to by the pre phase or the core phase
+
+
+
+
