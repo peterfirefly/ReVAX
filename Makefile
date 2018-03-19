@@ -40,6 +40,7 @@ help:
 	@echo '  ops      generated files that handle operands for asm/dis/sim'
 	@echo '  stats    how much code is there?'
 	@echo ''
+	@echo '  fixme    check for FIXMEs'
 	@echo '  spaces   check for trailing spaces'
 	@echo '  vars     print out makefile variables'
 	@echo ''
@@ -75,6 +76,11 @@ spaces:
 				tables/*.txt tables/*.snip		\
 				doc/*.txt				\
 				Makefile *.txt *.sh
+
+###
+
+fixme:
+	grep --color=yes FIXME Makefile *.sh */*.[ch] */*.pl */*.vu */*.spec doc/*.txt
 
 ###
 
