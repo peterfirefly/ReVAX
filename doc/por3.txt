@@ -1,0 +1,106 @@
+Plan of Record, VAX-project                                2018-03-19  Monday
+ (tentative)
+-------------------------------------------------------------------------------
+
+***
+This is not yet a finalized plan.  Not until the assembler/disassembler/simulator
+are all up and running again.
+***
+
+
+
+Differences with PoR v2
+---
+Lots of text has been removed because it isn't necessary anymore.
+
+The new architecture is in place now.  The assembler and disassembler both work.
+The simulator can actually run (simple) code now.
+This is about where to go next.
+
+
+
+Current Status
+---
+The simulator can run code in a realistic manner.  Many instructions are not
+yet implemented.  Interrupts and exceptions are not really implemented yet.
+Memory translation is not implemented yet.  Access checks (privilege levels) are
+not implemented yet.  Realistic bus access cycles are not implemented yet.
+No peripherals are implemented.
+
+The assembler can just about do something useful.  It is painfully weak.
+
+The disassembler can just about do something useful.  It can't handle tricky
+code where the separation of code and data is unclear.
+
+
+
+Feedback loop
+---
+The first few days of the project were fun -- I worked with a tight feedback
+loop until the simulator could handle a single instruction, and then until it
+could handle an addressing mode more, and then an instruction more, etc.
+
+Building the current version of the simulator (and assembler/disassembler) has
+not been fun although the result is some pretty sweet (and well-tested) code.
+
+I want that feedback loop back!
+
+One way to do that is to take a single binary, such as a small Unix executable
+or the "BIOS" used with the CVAX CPU and the SIMH simulator (ka655x.bin) and
+make it work, one instruction at a time.
+
+
+
+Principles
+---
+ - very simple "microarchitecture"
+ - "microcode"
+ - table-driven
+ - generated code/generated tables
+ - floating-point is hard -- use the mpfr library
+ - testing is hard -- use American Fuzzy Lop for fuzz testing
+ - applicative/state-less style
+ - all code is written in C or Perl (if they work on text) or Shell (if it's
+   just a dumb sequence of commands)
+ - a single (GNU) Makefile without too many tricks
+ - don't use too much linking -- use #include files instead
+
+The Makefile should probably start using a dependency checking macro now that
+there are so many #include files.
+
+It was probably a mistake to split shared into shared.h and shared.c.  Likewise
+with fp.h and fp.c.  They should probably be merged at some point.
+
+On the other hand, the parser routines don't really belong with the rest of the
+stuff in shared.[ch].  They should probably be moved to something like parse.h.
+
+
+
+Interrupts/exceptions
+---
+Before decoding an instruction, internal flags are checked to see if there
+interrupts or exceptions that should be served.
+
+
+
+Memory accesses
+---
+Simulate a bus that only understands aligned accesses.  One should have in one's
+mind a bus similar to PCI that handles small accesses and unaligned accesses
+through the use of "byte lanes" on a 32-bit bus.
+
+Memory accesses should be split internally into several accesses if the data
+size is bigger than 32 bits or if the access is unaligned.
+
+Each of those should go through TLB checks independently (and possibly trap).
+
+If such an access traps after a previous one that doesn't, the bus accesses are
+going to be different than expected: that's a problem with I/O and with
+interlocked access, so don't do those with unaligned accesses or bigger data
+than 32 bits.
+
+The traps can be (and probably should be) implemented as microtraps that do the
+table walking and then returns to the microcode instruction that caused the
+trap.
+
+

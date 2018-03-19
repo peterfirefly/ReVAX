@@ -1,0 +1,152 @@
+Plan of Record, VAX-project                                2017-07-01  Saturday
+-------------------------------------------------------------------------------
+
+The View from Space
+---
+Run VAX code a single instruction at a time by turning them to sequences of
+µinstructions.  All these µinstructions ultimately come from a microcode ROM,
+but some of them have patched in values taken from the instruction, such as the
+4 condition code bits for Bcc instructions or Rn/Rx/Imm for various addressing
+modes.
+
+The µinstructions resemble RISC instructions and try very hard not to do too
+much at the same time.  This let's them be pipelined (good for hardware performance),
+be JITted (good for software emulation), be analyzed (good for performance
+models and other tools), and be implemented with very little complexity (good
+for design time/budget).
+
+There are several phases of µinstructions associated with a VAX macroinstruction.
+First, there is an optional µpre flow, that loads operands into registers (there
+are extra internal registers in this model, above and beyond the 16 architected
+GPRs).  Then there is the µcore flow corresponding to the *actual* instruction.
+This is optionally followed by µpost for writing results to a GPR or to memory.
+The µpre flow actually consists of up to 6 µop flows, each handling a single
+operand.  The µop flows do not interfere with each other: they write their data
+to a different register for each operand (which is not read by any of the other
+µop flows), they only modify GPR registers for autoinc/dec modes, the only
+other registers they are allowed to modify are the two temporary registers t0 and t1.
+
+The three flow phases communicate via the registers o1..o6, dst, dsthi, and of
+course r0..r15.
+
+
+The microcode is written in a simple assembly language in a single text file.
+
+Almost everything is table-driven: how many operands each instruction has and
+of what kind is something that the decoder looks up in a table.  There are
+two Perl scripts that generate the tables and #define's used in the project,
+one of them also assembles the microcode and the labels in it into two C arrays.
+The output of the scripts are two C #include files and one Perl module.
+There is also an assembler and a disassembler for the VAX instruction set.  Those
+are also largely table-driven, using the same C #include files as the emulator.
+
+The emulator code has very little shared dynamic state.  Things are written almost
+in an applicative style, which should make for easy debugging.  It certainly
+makes for some nice code.
+
+Before decoding an instruction, internal flags are checked to see if there
+interrupts or exceptions that should be served.
+
+
+
+Current Status
+---
+It still can't run a single instruction.  It hasn't run a single instruction in
+about 14 days, since the first day or two of prototyping.  The initial prototype
+*could* run code, as long as only a handful of instructions were used with only
+two or three addressing modes.  The prototype was successful by showing that
+the overall architecture could work and that the complexity wouldn't be alarmingly
+high.
+
+There have been no big surprises except for how big the VAX architecture is and
+how poorly some aspects of it have been documented.
+
+There have been no showstoppers nor the faintest hint of any.
+
+The main reason why there's been little progress for several days is that I have
+been tired and overworked!
+
+I am currently mostly done with the last seven-ish things on the to do list
+before the CPU is nominally finished.  After that, there will be some I/O work
+and the inevitable testing and bugfixing.
+
+The problem is that I've been stuck on those seven-ish things for a week.  I have
+made clear progress and I have revised some of my design decisions for the better
+but still...
+
+
+
+Code-driven
+---
+The initial prototype was fun to code because it gave me immediate feedback on
+real code -- I tested it on 'ADDL3 R2, R3, R4'.
+
+I really miss that feedback loop.
+
+I spent a few days trying to see if I could get VMS binaries off a CD-ROM image
+I had downloaded which turned out to be in ODS-2 format (VMS-specific).  I could,
+but then the executable format seemed too complicated.
+
+My alternatives regarding code-driven development:
+ - hand-written bits'n'pieces
+ - a VMS binary
+ - a NetBSD binary
+ - an old Unix/32V binary (Unix/32V is an old port of System 7 to the VAX from
+   the PDP-11)
+ - KA655x.bin
+ - pieces I have "lifted" out of contex from, say, C compiler output
+
+The binaries are probably too hard to get up and running.  The KA655x.bin "BIOS"
+is one of my better bets, but I will probably run into systems programming too
+soon.  The last idea, code lifted from C compiler output, is probably the best
+one.  I wish I had thought of that a week or two ago :(
+
+
+
+Plan of Record
+---
+The decoder looks at operand specs and sets Imm/Rn/Rx variables.  It returns
+a compressed addressing mode number.
+
+There is, in principle, a microcode label for the Cartesian product of <access
+type> × <data length> × <addressing mode>.  In actual practice, there will be
+about 13 standard µop flows + a handful of special ones.  For example, bit field
+instructions treat bit vectors in registers different from bit vectors in memory.
+
+The reduction from 6 × 4 × 10+ = hundreds to about 20 could happen in several
+different ways, for example by having lots of labels to the same piece of
+microcode.  My chosen way is to have the reduction happen in the decoder through
+a table indexed by <access type>, <datalen>, and <addrmode> which returns a label/
+microcode address.
+
+The generation of this table will need a little help from uasm.pl.
+
+access() doesn't have to do mapping yet.  It doesn't have to handle page crossing
+yet.  It doesn't have to do naturally aligned access to I/O space yet.
+
+We also don't need to handle interrupts and exceptions yet.
+
+So just getting the decoder done and hooked up is enough to let us start
+playing with Real Code.
+
+So, I will get binutils up and running for VAX code (= compile from source).
+
+I will get gcc up and running for VAX code (= compile from source).
+
+I will compile to assembly, edit it into shape, assemble and link, and that will
+be my test code.
+
+This should let me gradually work my way through addressing modes and classes
+of instructions, until only queues and OS instructions are left.
+
+
+
+Actions
+---
+2017-07-01  resting.
+2017-07-01  d/l gcc + binutils source.
+2017-07-02  d/l more gcc versions, fight them.
+
+
+
+
