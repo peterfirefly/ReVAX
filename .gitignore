@@ -1,3 +1,13 @@
+# stuff I don't want to export to the world
+doc/2017-07*
+doc/asm.txt
+doc/diary.txt
+doc/old-readme.txt
+doc/plans.txt
+misc/*.lang
+*test*.log
+*test*.sh
+
 # coexistence with Mercurial
 .hg
 .hgignore
