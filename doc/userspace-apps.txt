@@ -1,0 +1,206 @@
+Userspace Apps
+-------------------------------------------------------------------------------
+
+Abstract
+---
+Instead of emulating a whole computer, it is sometimes useful to just emulate
+enough to make userspace apps run.  QEmu can do this and I hope ReVAX can do
+the same thing at some point.
+
+This might be faster/easier than getting enough of the VAX architecture +
+peripherals implemented to run VMS, which is important for testing.
+
+It will definitely be more convenient in many cases than having to spin up an
+actual VMS (or other OS) environment and bother with file mapping and network
+mapping in order for the VAX binaries to interact well with the host system.
+
+
+
+Operating systems
+---
+VMS 6.x
+NetBSD 1.5.3
+NetBSD 2.x
+OpenBSD 3.x
+Ultrix 4.x
+Linux 2.x
+
+I have small binaries from all these systems.  I ultimately care most about
+the ability to run VMS binaries, particularly compilers/assembler/linker and
+benchmarks.
+
+At first, it'll probably be more useful to get some of the a.out Unix binaries
+up and running.  I can easily generate VAX Linux binaries at will with my cross-
+compilation toolchain, so that will be really nice for testing.
+[Note 2018-03-19: this is not quite true.  I can't generate executables because
+I haven't built the necessary libraries.]
+
+
+
+Basic environment
+---
+The bare necessities are:
+ - some RAM the userspace app gets access to
+ - a single process that isn't allowed to spawn/exec other processes
+ - a command line
+ - an environment
+ - a process termination function, possibly with an exit code
+ - an output function
+ - an input function
+
+Luxuries:
+ - gettimeofday() or similar
+ - open file, close file, write to file, read from file
+ - create file
+ - delete file
+ - rename file
+
+Run-time library stuff:
+ - string manipulation?
+ - floating-point support?
+ - stack size checks?
+ - malloc/free?
+ - unsigned multiplication
+ - unsigned division
+
+
+
+How to run userspace apps
+----
+Check file format, load into (simulated) RAM, set up various tables/data areas
+(with command-line, environment, stack, ...), start executing instructions.
+
+Handle system calls, however the simulated operating system does it.
+
+
+
+File formats
+---
+a.out
+ELF
+VMS
+
+I already have some familiarity with the a.out and ELF formats.  I have dissected
+binaries in those formats, played with linker scripts, and written code to parse
+them.  The VMS format is entirely unknown to me and, frankly, a bit of a mystery.
+
+a.out is wonderfully simple (although there are many variants of it).  There
+is a tiny header and two main blocks in the file.  One block is the code, another
+the date.  There can be more blocks with relocation/symbol information but they
+are not complicated.  Debugging information is squeezed into the symbol table
+as extra symbols.  Many variations of the a.out format exist.
+
+ELF is not exactly simple but it's not too hard, either.  And it's well-documented
+and there's plenty of code floating around that handles it in various ways.
+ELF is extremely flexible and "forward-compatible" (because it is a general
+container format for "sections" and relocations).
+
+The VMS format is documented in a big book, along with other parts of VMS.
+Unfortunately, there is not very much code available that can handle it.  There
+isn't really any alternative sources of information on the VMS format, either.
+This is probably going to be the hardest format to support.
+
+
+
+Loader/linker
+---
+For all formats, basically a block read for the header, then some block reads
+for the code and data.  For some, also a block read or two for the relocations
+and one or two for the symbol table.
+
+The loader itself for a.out is not likely to be more than 100 lines, including
+error checks and error messages.
+
+ELF and VMS require a linker as well, which is harder.
+
+The loader/linker is not likely to take up much code.  I think the ELF part can be
+implemented in about 3-500 lines.
+
+The VMS loader/linker is going to be the hardest to implement (because it is
+unknown territory)
+
+
+
+System calls
+---
+The a.out Unix binaries are probably quite easy to implement because they are
+statically linked.  All the system calls happen through CHMx instructions, I think.
+
+The ELF Unix binaries are a lot harder.  They presume the existence of a shared
+library that can be dynamically linked in by the loader, which contains the
+actual system calls + various kinds of book keeping.
+
+The VMS binaries are hard.  They presume the existence of shared libraries that
+are already in memory which the binaries link to.  Those libraries implement a
+lot of the operating system, do lots of book keeping, and run at different
+privilege levels than the userspace apps.
+
+The a.out binaries only require the implementation of some actual system calls.
+The ELF and VMS binaries require linking some stubs in that pretend to live in
+various shared libaries.  How they pass control to the simulator doesn't matter:
+a magic code address, the XFC "instruction", other magic opcodes, ...
+
+With ELF and VMS binaries, it is not actually necessary to emulate actual syscalls
+(CHMx).
+
+
+
+EVax
+---
+The EVax VAX simulator seems to implement a "microkernel OS" that lets VAX
+binaries run under userspace emulation instead of full host emulation.  I don't
+really know, but it looks like it's an emulation of VMS.  The code is not
+particularly easy to follow, not because it is ugly but because the documentation
+is quite sparse.
+
+The EVax strategy is to implement lots of named entry points that -- somehow --
+get linked to the executable at load-time.  All these named entry points are
+stubs that use the XFC "instruction" to trap to the simulator.
+
+
+
+Strategy
+---
+Flesh this document out as I write the code.  Particularly regarding ELF and
+VMS linking -- and about the VMS executable file format.  Also about which
+functions to provide stubs for.  Maybe an aside or two about at what point it
+becomes easier to use an actual C runtime library, such as musl-libc.
+
+Don't try to analyze this to death before writing code.  Grab a simple a.out
+binary and -- more or less -- brute force it into working.  Then grab the next
+one and make that work.  Along the way, make the code nicer when it becomes too
+ugly/unflexible.
+
+After the a.out stuff basically works, do the ELF stuff.  Do VMS last because
+there is less example code and casual documentation (blog, stack overflow,
+newsgroup posts, ...).
+
+Working on the emulator was fun in the beginning, before I had much of an
+architecture in my head, because there was a tight feedback loop.  Once I had
+decided on an architecture and once I started doing proper testing, it became
+a real drag to work on (although everything did end up really nice, clean, and
+rather bug free).
+
+I want that fun back.
+
+
+
+References
+---
+EVax -- URL + source file/line number references for loader/linker
+[FIXME]
+
+
+ELF
+[FIXME]
+
+John R. Levine, "Loaders and Linkers", 1st ed, 1999.
+
+
+Ruth E. Goldenberg, "VAX/VMS Internals and Data Structures, version 5.2", 1991
+[FIXME: link to PDF scan at Al Kossow's bitsavers]
+
+a.out
+[FIXME]
+
+
