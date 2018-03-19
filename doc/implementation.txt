@@ -134,7 +134,7 @@ Conceptual datapath
       |  |   |      \   /
       v  \   /       \ /
     ------------------------------------
-     width val      addr  
+     width val      addr
 
       memory load/store
 
@@ -274,7 +274,7 @@ the forwarded result.
    | err | Idx | PC | type |
    +-----+-----+----+------+
       1     1     1    4
-     
+
      type: basically the upper 4 bits of the spec (the second spec if idx=1).
      idx is 1 for indexed addr modes (if the upper 4 bits of the first spec=4).
      PC is 1 if Rn = 15.
@@ -289,7 +289,7 @@ the forwarded result.
    to happen somewhere (so we don't write to immediate values, for example).
 
    FIXME figure out where to make that check.
-   
+
    FIXME drop err bit in addrmode and use a return value of 0?  Or -1?
          drop addrmode and pass in datalen and return 6-bit addrmode instead?
          And then look that up in a length array instead?  That would be a
@@ -344,10 +344,10 @@ the forwarded result.
           address (or loads from/stores to the address or moves the address to
           a register or pushes it to the stack) -- or a flow that loads an
           immediate corresponding to PC + displacement into a register.
-          
+
           The former system is more flexible, more table-driven, simpler C
           code.  It also generates slightly longer µpre-sequences.
-          
+
           I'll go for the former system, then.
 
    FIXME  the loop that calls decode_operand() needs to know which operand we
@@ -364,7 +364,7 @@ the forwarded result.
  */
 
 
-/* 
+/*
    Exceptions:
      INTO, DIV0
 
@@ -388,7 +388,7 @@ the forwarded result.
    decode-operand, fetch basic block, run it, fetch new basic block if branch/exception, ...
    decode next operand until we are done (or we get an exception)
    write result(s) (if we didn't get an exception)
-   
+
    did we request an exception?  I think this is for faults only -- INTO, DIV0
 
    Do we do the stack stuff and jmp to the exception vector here or do we wait
@@ -441,7 +441,7 @@ the forwarded result.
 #
 # Each flow ends with a '---' line.
 # There can be more than one label for a flow.
-# 
+#
 # Line comments begin with '#'.
 #
 # Similar flows are not merged in the first version.  That may come at a later
@@ -519,7 +519,7 @@ the forwarded result.
 #
 #   C takes operands from o1..o6 -- it knows precisely how many operands it has
 #   and of what kind.  It leaves results in dst (and possibly dst2).
-#   It is the only part that is allowed to change the flags.  
+#   It is the only part that is allowed to change the flags.
 #
 #   W writes the result from dst/dst2 back.  It may be written to a register
 #   (with a µmov) or to a precomputed address (left in one of the o1..o6
@@ -630,7 +630,7 @@ the forwarded result.
 # should use the next/current PC.  It is probably not necessary to have two
 # different rollback instructions: we can save r15 before or after the 'rollback'
 # instruction.
-# 
+#
 #
 # The string instructions can read/write their operands using autoinc/dec and
 # then work on memory inside a flow in the C phase.  In case of a trap here,
@@ -841,7 +841,7 @@ the forwarded result.
 # mov may write to PSL which causes an exception if both the V bit and bit 5
 # are set.
 #
-# A len of 64 is invalid for some µops:  all normal ALU ops, mneg/mcom/movz, 
+# A len of 64 is invalid for some µops:  all normal ALU ops, mneg/mcom/movz,
 # zeroext/signext.
 #
 # Some instructions have an implied length of 32 (imm, mfpr/mtpr, mbz) or a length
@@ -869,7 +869,7 @@ the forwarded result.
 # emul                    -- flags ; always reads from o1, o2, o3, writes to dst/dst2
 # ediv                    -- flags ; always reads from o1, o2/o3, o4, writes to dst, dst2
 #
-# 
+#
 # ; move (merge)
 # mov   src, src', dst          -- len flags  ; merge src/src' or use double
 #                                             ; registers (src, dst)
@@ -965,7 +965,7 @@ the forwarded result.
 #
 #    N := MSB(val)
 #    Z := val == 0
-#    V := 
+#    V :=
 #    C := alu.c
 #
 #
@@ -1014,7 +1014,7 @@ the forwarded result.
 #   64:  src+1 . src              => dst+1 . dst
 #
 # mcom
-# 
+#
 #
 # Some µops that change flags leave the C flag alone.  They have all been
 # explicitly named accordingly.
@@ -1265,7 +1265,7 @@ CVAX:
 
 - call/ret i CVAX µcode bruges til µtraps (TLB miss, page crossing + nogle
   andre interne) men mon ikke også de bruges i INDEX til at kalde MUL-koden?
-   
+
   Jo.  Og grep viser at CALL[] bruges til meget, meget mere.  Bittælling i
   CALLS/CALLG/RET, i implementationen af mul/div (for at implementere løkker),
   LDPCTX for at spare plads, kombineret med en *pointer* til et register som
@@ -1347,7 +1347,7 @@ CVAX:
   rollback
 
   dvs de kan implementeres som:
-  
+
    # virkeligt pæne µop-felter
   op | s1 | dst | s2 |len | flags	; 5 + (5 + 5 + 5) + 2 + 1 = 23
   op | s1 | dst |imm			; 5 + (5 + 5) + 32        = 47
@@ -1408,7 +1408,7 @@ CVAX:
   en PLA?
 
   Nok en god idé at lade uasm.pl lave en tabel over anvendte imm-værdier.
-  Nok en god idé at lade uasm.pl lave en tabel over anvendte bcc-targets (+ 
+  Nok en god idé at lade uasm.pl lave en tabel over anvendte bcc-targets (+
   hvilke conditions).
 
   Man kan fx lave et trick hvor instruktionerne kan ligge meget spredt ved at
@@ -1501,7 +1501,7 @@ Det interagerer med INTO-håndtering.  Det viser sig at dele af VAX-håndbogen e
 misvisende:
  o det er ikke et højt V-flag der giver exception
  o det er ikke højt V-flag kombineret med IV-flag der giver exception
- 
+
 så ville INTO nemlig være level-triggered.
 
  o det er lav-høj overgangen af V-flaget hvis IV allerede er sat der trigger INTO.
@@ -1513,7 +1513,7 @@ så ville INTO nemlig være level-triggered.
    RET skriver til både V og IV -- og det kan ikke give INTO
 
    MTPR kan ikke skrive til V/IV, kun IPL.
-   
+
    Det er faktisk kun ALU-gruppen der kan give INTO, selv om også andre skriver
    til V (og IV).
  o INTO giver ikke exception med det samme!  Resultatet bliver pænt skrevet til
@@ -1535,22 +1535,22 @@ så ville INTO nemlig være level-triggered.
    Lad os starte med at tage en kopi af flagene før vores µop.
    Lad os lave en switch på u.op, lad os regne naturligt med 32-bit ints (eller mere?),
    lad os skrive resultatet med result(), lad result() beregne forslag til NZ?
-   
+
    carry ved add, sub, adc, sbc?
-   
+
    mul/div/emul/ediv håndteres med 64-bit int til mellemregninger.
-   
+
    shl/rol håndteres med 64-bit unsigned int til mellemregninger.
 
    NZ(res, len)  -- giver 0/4/8/C
-   
+
    V_add(s1, s2, res, len) -- giver 0/2
    V_sub(s1, s2, res, len) -- giver 0/2
 
  o µMOV sætter flag.  µMOV må gerne skrive til PSL (som ligger i samme registerfil
    som r0..r15).  Hvilke flagskrivninger vinder så?  Hvis µMOV bruger µ-flag?
    Hvis µMOV bruger arch-flag?
-   
+
    Vi skal kunne skrive til PSL, ellers kan vi ikke implementere VAX'en.  Derfor
    skal µMOV til PSL ikke opdatere flag overhovedet.
 
@@ -2045,7 +2045,7 @@ med genbrug af næsten al µkoden.
 
 Glæder mig til at lave en dekoder!
 
-Så vidt jeg kan se burde det ikke være svært at lave en 
+Så vidt jeg kan se burde det ikke være svært at lave en
 
 
 FP

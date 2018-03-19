@@ -40,12 +40,13 @@ help:
 	@echo '  ops      generated files that handle operands for asm/dis/sim'
 	@echo '  stats    how much code is there?'
 	@echo ''
+	@echo '  spaces   check for trailing spaces'
 	@echo '  vars     print out makefile variables'
 	@echo ''
 	@echo 'see doc/readme.txt for more information.'
 	@echo ''
 
-.PHONY:	help all  tables ops snips  stats  vars  clean distclean
+.PHONY:	help all  tables ops snips  stats  spaces vars  clean distclean
 
 all:	asm dis sim  snips
 
@@ -66,9 +67,20 @@ vars:
 
 ###
 
+spaces:
+	misc/trailing-spaces.pl src/*.[ch] src/*.pl src/*.vu src/*.spec	\
+				misc/*.[ch] misc/*.pl misc/*.asm	\
+				runtime/*.c runtime/*.desc		\
+				ods2/ods2-firefly.c			\
+				tables/*.txt tables/*.snip		\
+				doc/*.txt				\
+				Makefile *.txt *.sh
+
+###
+
 # These three targets are the *actual* end product we care about
 
-asm:	src/asm.c src/shared.c src/vax-instr.h   src/shared.o 
+asm:	src/asm.c src/shared.c src/vax-instr.h   src/shared.o
 	$(CC) $(CFLAGS) $< src/shared.o -o $@
 
 dis:	src/dis.c src/shared.c src/vax-instr.h   src/shared.o
@@ -375,7 +387,7 @@ tables: src/vax-instr.h src/vax-instr.pl src/vax-ucode.h src/vax-fraglists.h
 src/vax-instr.h:	tables/instr.snip src/instr.pl
 	src/instr.pl --c    < $< > $@
 
-src/vax-instr.pl:	tables/instr.snip src/instr.pl 
+src/vax-instr.pl:	tables/instr.snip src/instr.pl
 	src/instr.pl --perl < $< > $@
 
 src/vax-ucode.h:	src/ucode.vu src/uasm.pl src/vax-instr.pl

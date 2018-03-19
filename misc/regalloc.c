@@ -235,7 +235,7 @@ void output_txt()
 	/* Assume that pre and exe registers are non-overlapping.
 	   We could conceivably get by with slightly fewer internal registers
 	   with some overlap and reuse.
-	   
+
 	   Even with 16 GPRs, 1 PSL, 10 fragment registers, and 2 tmp regs,
 	   we are still only at 29 regs, so still below 32.
 	 */

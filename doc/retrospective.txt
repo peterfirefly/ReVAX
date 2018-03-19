@@ -190,7 +190,7 @@ Not using mpfr straight away cost me maybe a week of work :(
 And it's not like it was cheap to use mpfr, either!
 The documentation is not super great, for example.
 
-Lots of bit fiddling to convert back and forth between VAX f/d/g/h and mpfr -- 
+Lots of bit fiddling to convert back and forth between VAX f/d/g/h and mpfr --
 but it would have been as bad or worse without mpfr.
 
 Testing the code was slightly tricky: how do I test that two values (before and
@@ -433,7 +433,7 @@ Disable warnings:
 
   /* Some of the sanitizers check for unsigned integer overflow, which is
      completely legal but usually a sign of a bug.
-    
+
      Switch it off inside this function because we know what we're doing.
    */
   void f(...) __attribute__((no_sanitize("unsigned-integer-overflow")));

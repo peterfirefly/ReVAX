@@ -639,7 +639,7 @@ void test_shortmul()
 	uint32_t	y = 1;
 	for (int i=1; i <= 9; i++) {
 		y = y * 10;
-		
+
 		printf("123456789012345678901234567901 x 10^%d (%d, 0x%04X_%04X)\n", i, y, SPLIT(y));
 
 		struct big_int	x = {

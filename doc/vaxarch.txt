@@ -472,7 +472,7 @@ Buses
 ---
 Unibus, PDP-11 compatibility, 1969
 Q22, PDP-11 (LSI-11), year?
-Massbus, PDP-10, PDP-11, 1970's	
+Massbus, PDP-10, PDP-11, 1970's
 VAXBI, VAX 6000/8000/9000
 XMI
 TURBOchannel
@@ -482,7 +482,7 @@ https://en.wikipedia.org/wiki/Q-Bus
 https://en.wikipedia.org/wiki/Massbus
 https://en.wikipedia.org/wiki/VAXBI_Bus
 https://en.wikipedia.org/wiki/TURBOchannel
-	
+
 
 bus transaction, DMA (devices can write to/from memory), interlocked
 I/O coherent caches

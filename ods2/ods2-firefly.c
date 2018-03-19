@@ -373,7 +373,7 @@ uint16_t getsize(uint16_t *rp)
 	switch (wtype) {
 		case WTP00:	return 0;
 		case WTP01:	return ((*((char *)rp))&0xFF)+1;
-		case WTP10:	return ((*rp)&0x3FFF)+1;		
+		case WTP10:	return ((*rp)&0x3FFF)+1;
 		case WTP11:	return ((((int32_t)(*rp)&0x3FFF)<<16)+rp[1])+1;
 	}
 
@@ -1012,7 +1012,7 @@ void options()
 		                p = &nativdev[kk];
 				break;
 				}
-		                break;  
+		                break;
 		case 'l':	++lsflag; break;
 		case 'c':	lsflag = 0; break;
 

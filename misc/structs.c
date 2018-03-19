@@ -166,7 +166,7 @@ int t_nostruct(uint8_t b[MAX_OPLEN], struct fields *fields, int width, enum ifp 
 /* Faking a string return in C99 with struct return.  Works great!
 
    gcc-5.4, no opt:
-     Somewhat inefficient.   
+     Somewhat inefficient.
 
    gcc-7, no opt:
      Still somewhat inefficient.  Better, though.
@@ -294,7 +294,7 @@ void dis_uinstr(int i, int uop_cnt, struct uop uop[])
 			break;
 
 		/* imm32, src */
-		case U_MBZ:			
+		case U_MBZ:
 			printf("%04X_%04X, %s", SPLIT(u.imm), struct_regstr(u.s1).str);
 			break;
 

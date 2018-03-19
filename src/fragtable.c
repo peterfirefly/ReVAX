@@ -99,7 +99,7 @@ int main()
 		} else {
 			printf("/* %02X %-6s */  {},\n", op & 0xFF, "---");
 		}
-		
+
 		if (((op & 0xF) == 0xF) && (op != 511)) {
 			printf("\n");
 		}

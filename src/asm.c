@@ -260,7 +260,7 @@ bool read_line(FILE *f, int lineno)
 		/* check there is only whitespace from now on until the ':' */
 		while (*p != ':')
 			if (!isspace(*p)) {
-				
+
 			} else
 				p++;
 
@@ -323,7 +323,7 @@ bool read_line(FILE *f, int lineno)
 found_instr:
 
 	/* [a-zA-Z][a-zA-Z0-9]* */
-	
+
 	/* check if operand list matches the instruction
 	     - # of operands
 	     - masks  => only immediates

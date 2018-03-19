@@ -89,7 +89,7 @@ static bool fp_from_str(struct big_int *x, const char *s, char type)
 
 		neg = !!mpfr_signbit(fp);
 		expfield = mpfr_get_exp(fp) + 128;
-		
+
 		if ((expfield < 0) || (expfield > 255)) {
 			/* exponent too small/large */
 			return false;
@@ -238,7 +238,7 @@ static bool fp_from_str(struct big_int *x, const char *s, char type)
 static struct str_ret fp_to_str(const char *fmt, struct big_int x, char type)
 {
 	mpfr_clear_flags();
-	
+
 	mpfr_t		fp;
 	bool		neg;
 
@@ -454,7 +454,7 @@ static struct str_ret fp_to_str(const char *fmt, struct big_int x, char type)
    This was an experiment.  Harder to write and harder to generalize to other
    sizes than 'f' than expected.  Not exactly code I can write (or test) late
    at night.
-   
+
    The code for d/g/h was written quickly, based on copying from the f code.
    No errors discovered in d/g/h durings tests.
 
@@ -681,16 +681,16 @@ struct big_int fp_nextafter_h(struct big_int from, struct big_int to)
 
 	   (((from.val[0] & 0x7FFFFFFF) == (to.val[0] & 0x7FFFFFFF)) &&
 	    ((from.val[1]               >   to.val[1]             ))) ||
-	   
+
 	   (((from.val[0] & 0x7FFFFFFF) == (to.val[0] & 0x7FFFFFFF)) &&
 	    ( from.val[1]               ==  to.val[1]              ) &&
 	    ((from.val[2]               >   to.val[2]             ))) ||
-	   
+
 	   (((from.val[0] & 0x7FFFFFFF) == (to.val[0] & 0x7FFFFFFF)) &&
 	    ( from.val[1]               ==  to.val[1]              ) &&
 	    ( from.val[2]               ==  to.val[2]              ) &&
 	    ((from.val[3]               >   to.val[3]             )))
-	   
+
 	   ) {
 		if (((from.val[0] & 0x7FFFFFFF) == 0x00010000) &&	/* x.00001.000000 */
 		     (from.val[1] == 0) &&
@@ -1030,7 +1030,7 @@ void test_all_f()
 					       i, SPLIT(i), str.str,
 					       SPLIT(fp2.val[0]), str2.str);
 				}
-				wrong_cnt++;				
+				wrong_cnt++;
 			}
 		}
 
@@ -1084,7 +1084,7 @@ void test_f()
 					       i, SPLIT(fp.val[0]), str.str,
 					       SPLIT(fp2.val[0]), str2.str);
 				}
-				wrong_cnt++;				
+				wrong_cnt++;
 			}
 		}
 	}
@@ -1125,7 +1125,7 @@ void test_f()
 					       i, SPLIT(fp.val[0]), str.str,
 					       SPLIT(fp2.val[0]), str2.str);
 				}
-				wrong_cnt++;				
+				wrong_cnt++;
 			}
 		}
 	}
@@ -1139,7 +1139,7 @@ void test_f()
 		struct big_int	fp;
 
 		/* 32 random bits.
-		
+
 		   mrand48() returns 32 bits but with as a signed long.
 		   lrand48() only returns 31 bits but always positive.
 
@@ -1179,7 +1179,7 @@ void test_f()
 					       i, SPLIT(fp.val[0]), str.str,
 					       SPLIT(fp2.val[0]), str2.str);
 				}
-				wrong_cnt++;				
+				wrong_cnt++;
 			}
 		}
 	}
@@ -1233,7 +1233,7 @@ void test_d()
 					    i, SPLIT(fp .val[0]), SPLIT(fp .val[1]), str.str,
 					       SPLIT(fp2.val[0]), SPLIT(fp2.val[1]), str2.str);
 				}
-				wrong_cnt++;				
+				wrong_cnt++;
 			}
 		}
 	}
@@ -1276,7 +1276,7 @@ void test_d()
 					    i, SPLIT(fp .val[0]), SPLIT(fp .val[1]), str.str,
 					       SPLIT(fp2.val[0]), SPLIT(fp2.val[1]), str2.str);
 				}
-				wrong_cnt++;				
+				wrong_cnt++;
 			}
 		}
 	}
@@ -1290,7 +1290,7 @@ void test_d()
 		struct big_int	fp;
 
 		/* 64 random bits.
-		
+
 		   mrand48() returns 32 bits but with as a signed long.
 		   lrand48() only returns 31 bits but always positive.
 
@@ -1332,7 +1332,7 @@ void test_d()
 					    i, SPLIT(fp .val[0]), SPLIT(fp .val[1]), str.str,
 					       SPLIT(fp2.val[0]), SPLIT(fp2.val[1]), str2.str);
 				}
-				wrong_cnt++;				
+				wrong_cnt++;
 			}
 		}
 	}
@@ -1386,7 +1386,7 @@ void test_g()
 					    i, SPLIT(fp .val[0]), SPLIT(fp .val[1]), str.str,
 					       SPLIT(fp2.val[0]), SPLIT(fp2.val[1]), str2.str);
 				}
-				wrong_cnt++;				
+				wrong_cnt++;
 			}
 		}
 	}
@@ -1430,7 +1430,7 @@ void test_g()
 					    i, SPLIT(fp .val[0]), SPLIT(fp .val[1]), str.str,
 					       SPLIT(fp2.val[0]), SPLIT(fp2.val[1]), str2.str);
 				}
-				wrong_cnt++;				
+				wrong_cnt++;
 			}
 		}
 	}
@@ -1445,7 +1445,7 @@ void test_g()
 		struct big_int	fp;
 
 		/* 64 random bits.
-		
+
 		   mrand48() returns 32 bits but with as a signed long.
 		   lrand48() only returns 31 bits but always positive.
 
@@ -1487,7 +1487,7 @@ void test_g()
 					    i, SPLIT(fp .val[0]), SPLIT(fp .val[1]), str.str,
 					       SPLIT(fp2.val[0]), SPLIT(fp2.val[1]), str2.str);
 				}
-				wrong_cnt++;				
+				wrong_cnt++;
 			}
 		}
 	}
@@ -1547,7 +1547,7 @@ void test_h()
 					    i, SPLIT(fp. val[0]), SPLIT(fp. val[1]), SPLIT(fp. val[2]), SPLIT(fp. val[3]), str.str,
 					       SPLIT(fp2.val[0]), SPLIT(fp2.val[1]), SPLIT(fp2.val[2]), SPLIT(fp2.val[3]), str2.str);
 				}
-				wrong_cnt++;				
+				wrong_cnt++;
 			}
 		}
 	}
@@ -1597,7 +1597,7 @@ void test_h()
 					    i, SPLIT(fp. val[0]), SPLIT(fp. val[1]), SPLIT(fp. val[2]), SPLIT(fp. val[3]), str.str,
 					       SPLIT(fp2.val[0]), SPLIT(fp2.val[1]), SPLIT(fp2.val[2]), SPLIT(fp2.val[3]), str2.str);
 				}
-				wrong_cnt++;				
+				wrong_cnt++;
 			}
 		}
 	}
@@ -1613,7 +1613,7 @@ void test_h()
 		struct big_int	fp;
 
 		/* 128 random bits.
-		
+
 		   mrand48() returns 32 bits but with as a signed long.
 		   lrand48() only returns 31 bits but always positive.
 
@@ -1659,7 +1659,7 @@ void test_h()
 					    i, SPLIT(fp. val[0]), SPLIT(fp. val[1]), SPLIT(fp. val[2]), SPLIT(fp. val[3]), str.str,
 					       SPLIT(fp2.val[0]), SPLIT(fp2.val[1]), SPLIT(fp2.val[2]), SPLIT(fp2.val[3]), str2.str);
 				}
-				wrong_cnt++;				
+				wrong_cnt++;
 			}
 		}
 	}

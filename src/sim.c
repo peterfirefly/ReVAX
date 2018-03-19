@@ -179,7 +179,7 @@ static int xlat(struct cpu *cpu, uint32_t va, uint32_t *pa)
 		}
 
 		return 0;
-		
+
 	} else {
 		/* no translation */
 		*pa = va;
@@ -207,7 +207,7 @@ static int access(struct cpu *cpu, int mode, uint32_t va, int len,
 	(void) cpu, (void) mode, (void) va, (void) len, (void) data, (void) datahi, (void) err;
 
 	/* xlat/access check, once or twice */
-	/* mem or I/O calls, once or twice 
+	/* mem or I/O calls, once or twice
 	   handle mem with memcpy()?  or with aligned access?  the latter.
 	   I/O definitely needs aligned access
 
@@ -224,10 +224,10 @@ static int access(struct cpu *cpu, int mode, uint32_t va, int len,
   bool fetch(uint32_t addr, unsigned bytecnt, uint8_t dst[bytecnt])
 
   alternative:
-  
+
     fetch n bytes from addr into dstbuf
     if that is impossible, fill remaining bytes with 0x00
-    
+
     return no of valid bytes?
     return last valid addr?
 
@@ -382,7 +382,7 @@ static void result(struct cpu *cpu, struct uop u, int32_t x, int w)
 }
 
 
-/* 
+/*
    Exceptions:
      INTO, DIV0
 
@@ -481,7 +481,7 @@ static void alu(struct cpu *cpu, struct uop u)
 
            Use a temporary so we can detect V changes.
 	 */
-	if ((u.flags == 0) && 
+	if ((u.flags == 0) &&
 	    (cpu->psl[0] & (1 << 5)) && (V(cpu->psl[0]) != V(old_NZVC))) {
 		/* INTO! */
 	}
@@ -518,7 +518,7 @@ static int datapath(struct cpu *cpu, int uop_cnt, struct uop uop[uop_cnt])
 			break;
 
 		/* imm32, src */
-		case U_MBZ:			
+		case U_MBZ:
 			if (cpu->r[u.s1] & u.imm)
 				return LBL_EXC_MBZ | U_EXC_MASK;
 			break;
@@ -679,7 +679,7 @@ static int datapath(struct cpu *cpu, int uop_cnt, struct uop uop[uop_cnt])
 			{
 				uint32_t	exc_addr;
 				(void) exc_addr;
-				
+
 				alu(cpu, u);
 			}
 			break;
@@ -730,7 +730,7 @@ static void run_flow()
    decode-operand, fetch basic block, run it, fetch new basic block if branch/exception, ...
    decode next operand until we are done (or we get an exception)
    write result(s) (if we didn't get an exception)
-   
+
    did we request an exception?  I think this is for faults only -- INTO, DIV0
 
    Do we do the stack stuff and jmp to the exception vector here or do we wait

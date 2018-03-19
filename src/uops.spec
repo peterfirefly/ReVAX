@@ -57,7 +57,7 @@
 # Uses 6-bit register names in template mode, some of which are not actual
 # registers but place holders that are replaced with actual register names
 # by the decoder.
-# 
+#
 # Uses 5-bit register names in expanded mode.
 #
 # It is illegal to reference r15/PC in µops in both template and expanded forms.

@@ -361,7 +361,7 @@ int32_t test20(uint8_t b[9])
      gcc-8-20180218
    bad:
 
-   will do unaligned reads, assumes little-endian   
+   will do unaligned reads, assumes little-endian
  */
 int32_t test21(uint8_t b[9])
 {

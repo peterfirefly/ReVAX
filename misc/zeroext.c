@@ -12,7 +12,7 @@ int32_t zeroext(int32_t x, int len)
 	switch (len) {
 	case U_LEN_8:
 		/* FIXME use double cast trick here, too?
-		
+
 		    return (int32_t)(uint8_t) x;
 		    return (int32_t)(uint16_t) x;
 		 */
@@ -36,7 +36,7 @@ int32_t zeroext2(int32_t x, int len)
 	switch (len) {
 	case U_LEN_8:
 		/* FIXME use double cast trick here, too?
-		
+
 		    return (int32_t)(uint8_t) x;
 		    return (int32_t)(uint16_t) x;
 		 */

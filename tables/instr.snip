@@ -6,7 +6,7 @@ Fixed a typo where 88 was written as BICB2 instead of the correct BISB2.
 They are corrected in the NVAX CPU Chip Functional Specification, Revision 1.0, February 1991.
 (And probably earlier than that.)
 
-
+Fixed two trailing spaces by the PROBER/PROBEW instructions.
 
 ------------------
 
@@ -378,8 +378,8 @@ ARCHITECTURE SUMMARY
 
         DA       MTPR src.rl, procreg.rl                                        * * 0 -         rsv, prv
 
-        0C       PROBER mode.rb, len.rw, base.ab                                0 * 0 - 
-        0D       PROBEW mode.rb, len.rw, base.ab                                0 * 0 - 
+        0C       PROBER mode.rb, len.rw, base.ab                                0 * 0 -
+        0D       PROBEW mode.rb, len.rw, base.ab                                0 * 0 -
 
         02       REI {(SP)+.r*}                                                 * * * *         rsv
 

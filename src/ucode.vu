@@ -53,7 +53,7 @@
 
 	imm	0x2004_0000, r15
 	imm	0xCAFE_BABE, psl
-#	imm	...., 
+#	imm	....,
 
 	imm	MAPEN, t0
 	mtpr	r0, t0
@@ -767,7 +767,7 @@ JMP:
 # Branch on Low Bit (Clear|Set)
 BLBC:
 BLBS:
-				
+
 # Branch on Bit (Clear|Set)
 BBC:
 BBS:
@@ -1029,7 +1029,7 @@ SVPCTX:
 	++	t0, t0		-- 32
 	st	r15, [t0]	-- 32
 	++	t0, t0		-- 32
-	---	
+	---
 
 
 LDPCTX:

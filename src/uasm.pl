@@ -6,7 +6,7 @@
 #
 # ---
 #
-# Generate microcode types, constants, tables, and stats.  
+# Generate microcode types, constants, tables, and stats.
 #
 #   misc/uasm-experiment.pl < src/ucode.vu > src/vax-ucodex.h
 #
@@ -90,7 +90,7 @@ sub read_spec() {
 		next if $_ eq '';
 
 		# parse valid spec (or error out)
-		if (not 
+		if (not
 		    /^(\S+)
 		      (?:\s+([a-zA-Z0-9\[\]]+)
 		       (?:\s*,\s*([a-zA-Z0-9\[\]]+)
@@ -351,7 +351,7 @@ my %cc = (
 	"gequ"	=> 14,
 	">=u"	=> 14,
 	"!c"	=> 14,
-	
+
 	"lssu"	=> 15,
 	"<u"	=> 15,
 	"c"	=> 15,
@@ -1092,7 +1092,7 @@ sub write_stats() {
 		if (not exists $lbl_use{$s}) {
 			printf "  %-30s\n", $s;
 		}
-	}	
+	}
 	print "\n";
 
 	print "Labels by name:\n";
@@ -1139,7 +1139,7 @@ sub write_stats() {
 			printf "  %-8s  FD %02X\n", $mne[$op], $op - 0x100;
 		}
 	}
-	
+
 	printf "******************/\n";
 	printf "\n";
 }

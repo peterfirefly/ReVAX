@@ -60,7 +60,7 @@ while (<>) {
 			# multi-byte opcode
 			if ((($opcode & 0xFF) == 0xFD) && (($opcode >> 16) == 0)) {
 				# proper two-byte opcode
-				$opcode = 0x100 + ($opcode >> 8);				
+				$opcode = 0x100 + ($opcode >> 8);
 			} else {
 				print "Wrong opcode: $1\n";
 			}
@@ -68,7 +68,7 @@ while (<>) {
 
 		my $instrname_str = $2;
 		my $oplist_str = $3;
-#		my $cc_str = $4;	
+#		my $cc_str = $4;
 		my $exp_str = $5;
 
 		# check for synonyms -- XX{=YY}, XX{=YY=ZZ}
@@ -404,7 +404,7 @@ sub print_for_c() {
 		my $instr  = $$v[1];
 
 		if ($opcode < 0x100) {
-			printf "        { .op =   0x%02X,   .name = \"%s\"%s},\n", 
+			printf "        { .op =   0x%02X,   .name = \"%s\"%s},\n",
 				$opcode, $instr, " " x (6 - length $instr);
 		} else {
 			printf "        { .op = 0x%02XFD,   .name = \"%s\"%s},\n",

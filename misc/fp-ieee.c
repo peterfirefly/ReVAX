@@ -22,7 +22,7 @@
    Converting to decimal representation (output):
       Jon White & Guy Steele, Dragon4
       Florian Loitsch, Grisu (skip Dragon4 in 99.4% of cases)
-   
+
    Converting from decimal representation (input):
       William Clinger, Bellerophon
       David Gay, strtod.c
@@ -134,7 +134,7 @@ int main()
 	printf("divby0:    %d\n", mpfr_divby0_p());
 	printf("nanflag:   %d\n", mpfr_nanflag_p());
 	printf("inexflag:  %d\n", mpfr_inexflag_p());
-	printf("erangeflag:%d\n", mpfr_erangeflag_p());	
+	printf("erangeflag:%d\n", mpfr_erangeflag_p());
 
 	mpfr_free_cache();
 

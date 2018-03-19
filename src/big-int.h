@@ -13,7 +13,7 @@
 
 /* 128-bit value needed for octo/h
    (64-bit needed for quad/d/g)
-	
+
    [0] = least-significant word
    [3] = most-significant word
 
@@ -59,7 +59,7 @@ struct big_int big_neg(struct big_int x)
 struct big_int big_shortmul(struct big_int x, uint32_t y, bool *overflow)
 {
 	/* ABCD and y and W are 32-bit "digits".
-	
+
 	    ABCD * y
 	    --------
 	      XX	all the partial sums are 64-bit

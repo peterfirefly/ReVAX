@@ -217,7 +217,7 @@ but I stalled for an eternity on:
  - partial-width operations and zero/sign extension
  - flags (which µops set the flags how?  did I need several versions of each,
    with different flag setting?)
- - 64-bit operations 
+ - 64-bit operations
  - shift operations -- how realistic should they be?
  - mul/div operations -- how realistic should they be?
  - MOVQ takes two µops now that I've decided on a realistic 32-bit datapath.

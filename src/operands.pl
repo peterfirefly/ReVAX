@@ -65,7 +65,7 @@ sub read_file() {
 	while (<>) {
 		# kill trailing \n
 		chomp;
-		
+
 		my $line = $_;
 
 		# section header?
@@ -143,7 +143,7 @@ sub read_file() {
 			printf STDERR "  remaining:     |$_|\n";
 			exit 1;
 		}
-		push @{$file{$section}}, 
+		push @{$file{$section}},
 			   {'bytes'    => \@bytes,
 		            'data'     => $data,     'width' => $width,
 		            'checkfun' => $checkfun,
@@ -205,7 +205,7 @@ sub dump_file() {
 				$action = $case->{'action'};
 			}
 
-			printf "%-40s %-8s| %s\n", $s, $checkfun, $action;			
+			printf "%-40s %-8s| %s\n", $s, $checkfun, $action;
 		}
 		print "\n";
 	}
@@ -640,7 +640,7 @@ sub handle_dis_syntax($) {
 				"\t" x $i, pattern($pattern);
 		}
 
-		my $indent = "\t" x (1 + scalar @bytes);	
+		my $indent = "\t" x (1 + scalar @bytes);
 
 		printf "%sstruct dis_ret\tret;\n", $indent;
 		printf "%sint\t\tidx = 0;\n", $indent;
@@ -890,7 +890,7 @@ sub handle_sim() {
 				"\t" x $i, pattern($pattern);
 		}
 
-		my $indent = "\t" x (1 + scalar @bytes);	
+		my $indent = "\t" x (1 + scalar @bytes);
 
 		# field captures
 		for (my $i=0; $i < scalar @bytes; $i++) {
@@ -1074,7 +1074,7 @@ sub handle_val() {
 				"\t" x $i, pattern($pattern);
 		}
 
-		my $indent = "\t" x (1 + scalar @bytes);	
+		my $indent = "\t" x (1 + scalar @bytes);
 
 		# field captures
 		for (my $i=0; $i < scalar @bytes; $i++) {

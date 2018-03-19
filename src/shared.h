@@ -136,7 +136,7 @@ void parse_rollback();
 /* match optional whitespace */
 void parse_skipws();
 
-/* match mandatory whitespace */ 
+/* match mandatory whitespace */
 void parse_ws();
 
 /* [_a-zA-Z][_a-zA-Z0-9]* -- implicit parse_skipws()  */
@@ -151,7 +151,7 @@ bool parse_hex(unsigned long *x);
 /* decimal -- no 0b/0/0x prefixes -- implicit parse_skipws() */
 bool parse_int(int *x);
 
-/* decimal -- or binary/octal/hex with 0b/0/0x prefixes  -- implicit parse_skipws() 
+/* decimal -- or binary/octal/hex with 0b/0/0x prefixes  -- implicit parse_skipws()
 
    FIXME  num8, num16, num32, num64?
  */

@@ -375,7 +375,7 @@ void parse_skipws()
 }
 
 
-/* match mandatory whitespace */ 
+/* match mandatory whitespace */
 void parse_ws()
 {
 	if (!parse_ok)

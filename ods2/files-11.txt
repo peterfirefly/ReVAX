@@ -44,7 +44,7 @@ ligger i.
                  next one by a termination character.  A text file is an
                  example of a stream-format file using line feed or carriage
                  return to separate records.
-                 
+
                  STREAM    - terminated by CRLF
                  STREAM_CR - terminated by CR
                  STREAM_LF - terminated by LF
@@ -175,7 +175,7 @@ RVN = hvilken volume i et volume set?  (når man har en logisk disk bestående
       af flere fysiske diske)
 
 
-En directory file er en særlig fil.  Liste af filnavne, filversionsnumbre og 
+En directory file er en særlig fil.  Liste af filnavne, filversionsnumbre og
 FID'er.
 
 block 1 = boot block, har en pointer til "primary bootstrap image".
@@ -184,7 +184,7 @@ block 1 = boot block, har en pointer til "primary bootstrap image".
 block 2 = primary home block.  Indeholder volume name, location of the extents
           comprising the remainder of the index file, the volume owner's UIC,
           and the volume protection information.
-          
+
           There are normally several additional copies of the home block, known
           as the secondary home blocks, to allow recovery of the volume if it
           is lost or damaged.
@@ -223,7 +223,7 @@ MFD - Master File Directory
  CONTIN.SYS   -- continuation file ?!
  BACKUP.SYS   -- backup log file
  BADLOG.SYS   -- pending bad block
- 
+
 
 Directories er sjove.  Der er en (pakket) tabel af directory entries med et
 navn + en liste af (version, file_id) tupler.  Sådan supporter man flere versioner

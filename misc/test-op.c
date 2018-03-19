@@ -180,7 +180,7 @@ static bool parse_bigint(struct big_int *x, int width)
 		parse_rollback();
 		return false;
 	}
-	
+
 	tmp = (struct big_int) {.val[0] = fromhex(ch)};
 	while (parse_oneof_ch("0123456789ABCDEFabcdef_", &ch)) {
 		if (ch == '_')
@@ -797,7 +797,7 @@ struct afl_input afl_input()
 
 	parse_skipws();
 
-	
+
 	/* bytes in hex */
 	while (afl.cnt < MAX_OPLEN) {
 		parse_begin();
@@ -819,7 +819,7 @@ struct afl_input afl_input()
 		fprintf(stderr, "AFL mode, garbage at end of line after the bytes.\n");
 		exit(EXIT_SUCCESS);	/* ? */
 	}
-	
+
 	return afl;
 }
 
