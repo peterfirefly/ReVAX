@@ -15,8 +15,15 @@ misc/*.lang
 # backup files
 *~
 
+# gcc precompiled headers
+*.h.gch
+
 # a2ps output
 *.ps
+
+# silly little temp files
+xxx*
+*.swp
 
 # executables -- standard programs
 asm
