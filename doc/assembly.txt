@@ -1,0 +1,695 @@
+VAX Macro Assembler
+-------------------------------------------------------------------------------
+
+(These notes were written in the middle of March '18 while I tried to understand
+various VAX assembly language dialects better.)
+
+
+Abstract
+---
+I need to implement a decent assembly language.  I have source code for the
+original VAX Macro Assembler (8000 lines in the eVAX project).  I also have
+some source code that uses the (GNU) AT&T Unix syntax.
+
+I think I need some degree of compatibility with both.
+
+
+
+VAX Macro Assembler
+---
+The assembler is smarter than I'd thought.  It's pretty nifty that it has
+direct support for construction page table entries, for example.
+
+The Macro Assembler language is big.  Very big.  The source code I have uses
+only a small fraction of it -- thankfully.  I have not seen a single macro
+definition or use, for example.  Nor have I seen the use of a single string
+function.
+
+Source lines can only be up to 132 characters (including or excluding line
+termination?)
+
+A statement consists of up to four fields:
+ - label field  -- optional
+ - operator field
+ - operand field -- must conform to the instruction/directive/macro in the operator field
+ - comment field -- optional
+
+'-' as the last nonblank character before the comment field = line continuation.
+Also works inside identifiers!  (as long as the following line doesn't start with
+whitespace, of course.)   I don't think I have a single line continuation in my
+source code.
+
+Permanent and user-defined symbols.
+
+User-defined symbols can be up to 31 characters, can contain alfanum + '_', '$' and '.'
+
+':'   -- defined only for the current module (internal symbol)
+'::'  -- globally defined, can be referenced from other object modules
+         (I have none of those in my source code)
+
+Labels can't be redefined.
+
+Local labels à la GNU Assembler?  ('1f', '2b', ...)
+
+Two or more operands are separated by ','.
+
+
+----
+
+Special characters
+
+ '_'		character in symbol names
+ '$'		character in symbol names
+ '.'		character in symbol names, current location counter, and decimal point
+ ':'		label terminator
+ '='		direct assignment operator, macro keyword argument terminator
+ tab, space	field terminators
+ '#'		immediate addressing mode indicator
+ '@'		deferred addresing mode indicator and arithmetic shift operator
+ ','		field, operand, and item separator
+ ';'		comment field indicator
+ '+'		autoincrement addressing mode indicator, unary plus operator, and arithmetic addition operator
+ '-'		autodecrement addresing mode indicator, unary minus operator, arithmetic subtraction operator, and line continuation indicator
+ '*'		arithmetic multiplication operator
+ '/'		arithmetic division operator
+ '&'		logical AND operator
+ '!'		logical inclusive OR operator point -- NOTE!  [I don't have any of those]
+ '\'		logical exclusive OR and numeric conversion indicator in macro arguments -- NOTE!
+ '^'		unary operators and macro argument delimiter
+ '[]'		index addressing mode and repeat count indicators
+ '()'		register deferred addressing mode indicators
+ '<>'		argument or expression grouping delimiters
+ '?'		created local label indicator in macro arguments
+ ' (apostrophe) macro argument concatenation indicator
+ '%'		macro string operators
+
+
+It seems I can safely ignore most of these.
+
+
+----
+Numbers
+
+Numbers can be integers, floating-point numbers, or packed decimal strings.
+
+Integers can be used in any expression including expressions in operands and in
+direct assignment statements.
+
+[+|-] nnnn	where nnnn is a string of numeric characters in the current radix.
+
+All integers are decimal unless the number is preceded by a radix control operator.
+
+Integers must be in [-2^31..2^31-1] (signed) or [0..2^32-1] (unsigned).
+
+
+Floating-point numbers can be used in .f_floating/.d_floating/.g_floating/.h_floating
+directives (the two first have the aliases .float/.double) or as operands in
+floating-point instructions.
+
+Can't be used in expression except with unary plus, unary minus, "unary floating-point
+operator ^F".
+
+Fp formats without exponent:
+
+[+|-] nnn
+[+|-] nnn.nnn
+[+|-] nnn.
+
+Fp formats with exponent:
+
+[+|-] nnnE[+|-]nnn
+[+|-] nnn.nnnE[+|-]nnn
+[+|-] nnn.E[+|-]nnn
+
+nnn is a a string of digits (0-9).
+
+The assembler can be directed to truncate or round single-precision fp numbers.
+Higher-precision numbers are always rounded.
+
+
+Packed decimal strings -- used only in the .packed directive.
+---
+Symbols
+
+"permanent symbols" -- instruction mnemonics, VAX Macro directives, register
+names.
+
+Register names can't be redefined.
+
+r12/ap can be referred to as either r12 or ap.  fp/sp/pc can only be referred
+to as fp/sp/pc, not as r13/r14/r15.
+
+"IV", "DV" are also permanent symbols that can't be redefined -- used in register
+masks for integer overflow trap and decimal string overflow trap.
+
+
+User-defined symbols, macro names
+
+'$' reserved for DEC/Compaq/HP.
+
+User-defined symbols and macro names live in different namespaces.
+
+Search order for symbol lookup -- operator field:
+ - previously defined macro names
+ - user-defined opcodes
+ - permanent symbols (instructions and directives)
+ - macro libraries (?!)
+
+Symbols are local unless they are labels with '::' or symbols with '==' or
+if '.global' is used.
+
+Use '.external' for external references to global symbols.
+
+Local labels are possible:
+
+  nn$		nn is a decimal integer [1..65535]
+
+They can't be referenced outside the block they appear in (what's a block?).
+They can be reused in other blocks.
+They don't appear in symbol tables.
+They can't be used in the '.end' directive.
+
+Use only 1$..29999$ because the assembler creates local labels 30000$..65535$
+(to handle far conditional branches?)
+
+Blocks are delimited by normal labels, '.psect' -- modifed by '.enable'/'.disable' stuff.
+
+".enable local_block", ".disable local_block".
+
+Local label blocks can cross sections -- but it's a bad idea.
+----
+Terms and expressions
+
+a term is:
+ - a number
+ - a symbol
+ - current location counter ('.')
+ - textual operator followed by text
+ - any of the previous preceded by a unary operator
+
+Terms are evaluated as longword (4-byte) values.  '.' has the value of the location
+counter at the start of the current *operand*, not *operator*!
+
+
+Expressions are combinations of terms joined by binary operators and evaluated
+as longword (4-byte) values.  Strictly from left to right with no operator
+precedence rules.  '<>' can be used to change the order of evaluation.
+
+Unary operators are considered part of a term.
+
+Expressions fall into three categories:
+ - relocatable
+ - absolute
+ - external (global)
+
+Relocatable: if its value is fixed relative to the start of the program section in which it appears
+Absolute:    if assembly-time constant.  An expressions whose terms are all numbers is absolute.
+             An expression that consists of a relocatable term minus another relocatable term from
+             the same program section is absollute.
+External: if it contains one or more symbols that are not defined in the current module
+
+
+Any type of expression can be used in most statements but there are restrictions
+for the following:
+ - .align
+ - .blkx
+ - .if/.iif
+ - .repeat
+ - .opdef
+ - .entry
+ - .byte/.word/.long/.signed_byte/.signed_word repetition factors
+ - direct assignment statements
+
+Expressions used in these directives/statements can only use symbols previously
+defined in the current module (no externals, no forward refs).  Furthermore,
+they must be absolute, except for direct assignment statements where they
+can be relocatable.
+---
+Unary operators
+
+ '+'	+A
+ '-'	-A		negative (2's complement)
+ '^B'	^B11000111	binary
+ '^D'	^D127		decimal
+ '^O'	^O34		octal
+ '^X'	^XFCF9		hexadecimal
+ '^A'	^A/ABC/		ASCII string ("ABC") -- 1..16 characters
+ '^M'	^M<R3,R4,R5>	register mask
+ '^F'	^F3.0		3.0 is a floating-point number
+ '^C'	^C24		one's complement (not) of 24 (decimal).
+
+They can of course be chained:
+  -+-A
+
+The radix control operators are weirder than I thought:
+
+  .LONG		^X<F1C3+FFFFF-20>
+  .LONG		^O<10000 + 100 + ^D16>		; ^D not normally needed
+
+No space allowed between '^' and the following character.
+Whitespace allowed before/after all unary operators.
+
+^A and ^M are called "textual operators".
+
+^A string must not be larger than the data type of the operand.  Many possible
+delimiters:
+
+  .QUAD	^A%1234/678%	; "1234/678"
+  MOVL	#^A/ABCD/, R0	; '#' = immediate
+  			; 'A' (0x41) is the low-order byte
+  			; 'D' (0x44) is the high-order byte
+  MOVL	#^A/AB/, R0	; 'A' (0x41) is the low-order byte (byte #0)
+  			; 'B' (0x42) is byte #1
+  			; the high-order bytes (byte #2, #3) are zero.
+
+^M reg-name
+^M <reg-name-list>
+
+reg-name is a register name or DV/IV trap-enable specifiers.
+
+^Fliteral:
+
+  MOVL	#^F3.7, R0	; should really use MOVF instead
+  MOVF	#^F3.7, R0	; much better!
+
+^F... only works with F floating values, I think.
+
+There is no floating-point evaluation in the assembly language.
+----
+Binary operators
+
+ '+'	A+B	addition
+ '-'	A-B	subtraction
+ '*'	A*B	multiplication (signed?)
+ '/'	A/B	division (signed?)
+ '@'	A@B	arithmetic shift
+ '&'	A&B	logical AND
+ '!'	A!B	logical inclusive OR
+ '\'	A\B	logical exclusive OR
+
+They all have the same priority.
+
+All use 4-byte values.  The assembler checks if reduction to 1/2-byte operands
+lose significance.
+
+
+  .LONG		^B101@4			; yields 1010000 (binary)
+  .LONG		1@2			; yields 100 (binary)
+  MOVL		#<^B1100000@-5>, R0	; yields 11 (binary)
+----
+Direct assignment
+
+  symbol =  expression
+  symbol == expression
+
+These symbols can be redefined as often as desired.
+
+Can a direct assignment statement be preceded by a label?
+----
+.ORG  trick with the current location counter
+
+  . = expression	; expression can't contain any undefined symbols
+
+  . = .+40		; move location counter forward
+
+If the program section is relocatable, then so must the expression be.
+----
+Macro arguments and string operators
+
+Example:
+
+  .macro	store arg1, arg2, arg3
+  .long		arg1
+  .word		arg3
+  .byte		arg2
+  .endm		store
+
+So something like this:
+
+  store		3,2,1
+
+expands to:
+
+  .long		3
+  .word		1
+  .byte		2
+
+It's okay to supply too few arguments to a macro.
+
+Keyword arguments are possible.
+
+String arguments are in '<>'.  Or ^x....x, where x is pretty much any character.
+
+Macro invocation strips the outermost delimiters off -- much like shell script :(
+
+' (an apostrophe) is argument concatenation (with some other text)
+'' (two apostrophes) is argument concatenation (of two arguments)
+
+Labels inside macros get turned into "created local labels", that is, 30000$..65535$,
+if they are declared with a '?' in the .macro statement.
+
+%LENGTH(string)
+%LOCATE(string1, string2 [, symbol])
+%EXTRACT(symbol1, symbol2, string)
+
+I don't need to support macros at all :)
+----
+Addressing modes/operands
+
+#...			-- immediate
+			   the assembler chooses lit6 if the literal fits
+			   (that requires that it be known and not relocatable or external)
+
+S^#...			-- lit6, error if the literal doesn't fit
+
+I^#...			-- immediate -- force immediate instead of lit6
+
+addr			-- stored as displacement from PC
+G^addr			-- relative from PC or absolute value (depends on whether
+			   the address relocatable or absolute)
+
+@
+@#
+
+-(..)
+(..)+
+
+B^dis(...)
+W^dis(...)
+L^dis(...)
+dis(...)		-- if the value is known, the assembler chooses the smallest
+			   number of bytes the displacement will fit into.
+			   If unknown, the assembler reserves 2 bytes.  The linker
+			   will produce an error message if the displacement doesn't
+			   fit.
+
+@B^dis(...)
+@W^dis(...)
+@L^dis(...)
+@dis(...)		-- same as "dis(...)" above regarding size and linker.
+
+
+...[..]
+
+
+Example:
+
+  CMPL	 W^<DATA+4>, R10	; compare R10 with longword at address DATA+4
+  				; the address is stored as a word displacement
+  				; from the PC
+
+I think I understand it now :)
+
+
+
+----
+eVAX assembler
+
+eVAX contains a built-in assembler (that can be used at run-time).
+
+It is documented in evax.doc (in the CVS version of evax).
+
+
+It doesn't support '::' labels or '==' symbols.
+
+It doesn't support macros.
+
+Labels that begin with '_' are considered local.
+
+case insensitive labels, opcodes.
+
+
+ #100 or I^#100		-- immediate mode
+ S^#1			-- short immediate (lit6)
+ r0..r12, ap/fp/sp/pc
+ @#loc			-- absolute mode
+ @ptr			-- indirect mode
+ -(r5)			-- autodecrement mode
+ (r6)+			-- autoincrement mode
+ B^05(r1)		-- byte displacement mode
+ 			why is this not "binary"?  because that's '^B' with
+ 			the '^' coming first
+
+ W^1503(r2)		-- word displacement mode
+ L^FFFFE3F0(r8)		-- longword displacement mode
+ @B^05(r1)		-- deferred byte displacement mode
+ @W^1503(r2)		-- deferred word displacement mode
+ @L^FFFFE3F0(r8)	-- deferred longword displacement mode
+ (r0)[r1]		-- indexed mode (one of them -- there are many)
+
+
+There is a current location maintained for S0, P0.  Not P1?
+
+.ascii	"...."		-- straightforward storage of the bytes of the string
+.ascic	"...."		-- counted string (16-bit unsigned length field first)
+.ascid  "...."		-- string descriptor: 8 bytes for length/type/address
+			   of the string.  The string itself is stored right
+			   after the descriptor.  The type word is 0.
+.asciz	"...."		-- zero-terminated string (C string)
+
+
+.base	exp		-- it's called 'ORG' in many other assemblers
+
+.blkb	n
+.blkw	n
+.blkl	n		-- zero-filled storage area that holds n bytes/words/longs
+
+.blkf			-- similar for F floating-point
+
+
+.console ....		-- console commands during assembly process -- ugly :(
+
+.end	[entrypoint]	-- end of assembly file
+
+.microkernel		-- sets flags in the emulator to indicate that there is
+			   a microkernel present.
+
+.mode	user/kernel	-- enable/disable assembly to kernel memory area (normally
+			   write protected)
+
+.region 		-- switch between P0 and S0
+
+.scb			-- sets values in the SCB.  Takes three operands:
+			   the slot to set (offset into the SCB), the address of
+			   the handler for this, whether to use KSP or ISP.
+			   (this is normally set in one of the two lowest bits
+			   of the handler address.  The other indicates whether
+			   the handler is in microcode or normal VAX code.)
+
+.set			-- because eVAX' assembler doesn't support normal
+			   direct symbol assignments.
+
+Allows forward references in some cases :(
+
+.set	/entry
+.set	/label
+.set	/perm
+
+
+
+----
+VAX Macro Assembler (MACRO-32)
+
+.address	store addresses -- preferred over .long (better info to linker!?)
+
+.ascid		the type/information field is supposed to always be set to 0x010E
+		according to the VAX Macro manual.
+
+.blka
+.blkb
+.blkd
+.blkf
+.blkg
+.blkh
+.blkl
+.blko
+.blkq
+.blkw
+
+.byte
+.word
+.long
+.quad
+.octa		"octa" for "octaword" is actually a spelling error :(
+
+.signed_byte
+.signed_word
+
+.float
+.f_floating
+.double
+.d_floating
+.g_floating
+.h_floating
+
+
+.if ...
+...
+.endc
+
+.iif ...	single-line conditional assembly
+
+.entry		entry point + register save mask
+.mask		additional register save mask -- always refers to a .entry
+		directive and the actual register mask will be a combination
+		of the mask in the .entry and the mask in the .mask.
+
+
+.ntype symbol, operand	; sets the symbol to the opspec for the operand
+			; (roughly -- it's not quite the same value as for the
+			; opspec)
+
+.opdef	MOVL3	^XA9FF, RL, ML, WL	; FF A9 ...
+.opdef	DIVF2	^X46, RF, MF		; "definition" of DIVF2
+.opdef	MOVC5	^X2C, RW, AB, AB, RW, AB; "definition" of MOVC5
+.opdef	CALL	^X10, BB		; equivalent to BSBB
+
+
+; sections have attributes: ABS (absolute), CON (concatenate), EXE (executable),
+; GBL (global), LCL (local), LIB (library), NOEXE, NOPIC (no position independent code),
+; NORD (nonreadable), ... (many more)
+.psect	[program-section-name [, arg-list]]
+.psect	CODE, NOWRT, EXE, LONG
+.psect	RWDATA, WRT, NOEXE, QUAD
+
+.transfer symbol	; for creating jump stubs for shared libaries
+			; (that's also what .mask is for)
+
+.weak	symbol-list	; weak symbols
+
+
+
+----
+GNU as (AT&T)
+
+.dfloat
+.ffloat
+.gfloat
+.hfloat
+.float	 = .ffloat
+.double  = .dfloat
+
+
+# starts a comment (or a preprocessor directive or a line number if in the first column)
+; separates statements on the same line
+
+Doesn't support bitfields (and probably also not EDITPC or Packed Decimal Strings).
+
+Pseudoinstructions for "far" conditional branches -- replaced with the shortest
+instruction sequence possible, be it a single instruction with 8-bit displacement
+or a conditional branch around a word/long displacement unconditional branch.
+
+'$' indicates an immediate operand instead of '#'
+'*' indicates indirection ("deferred") instead of '@'
+'`' (accent grave) indicates displacement instead of '^'
+`G  (^G) isn't supported
+
+r13/r14/r15 are allowed
+
+doesn't have ".entry".
+
+
+----
+Why so many .asci* variants?
+
+Why the .region directives?
+Why the .console directives?
+Why .set with and without '='?
+Why .set /perm?
+
+
+
+';' line comments
+'$' in identifiers
+xxx: labels
+
+case insensitive mnemonics.
+case sensitive labels/identifiers?
+
+.jeql	exit
+.jneq	ckn3
+
+.region	system
+.region	p1
+.region s0
+
+.end	main
+
+.set
+.set /perm  $$$_NORMAL ^d1
+.set /perm  $$$_cONTINUE ^d1
+.set /perm $$$_DEVNOTMOUNT ^d124
+.set jsb_header,0x9F16
+.set NL, 10
+.set	tst_len = . - tst_addr - 1
+
+.base	300
+
+
+.align
+
+; 	register save mask declarations for CALLS/CALLG procedures
+.entry	exe$signal, ^m<r2, r3, r4>
+.entry	exe$$put_console
+
+.ascic	"Test String of Text"
+.ascid
+.asciz
+.ascii
+.byte	0a, 0d
+.word	4, Primitive
+.long	. - exe$init_msgb
+.long	^X00000290
+.long	0,0,0,0,0,0,0,0
+.long	ostk
+.blkb	100
+.blkb	^d20
+.space	4
+.space	1025
+.case	_f5
+
+.shim	lib$adawi,	^d1, LIBRTL, 	0778
+
+.scb	exe$chmk,	exe$chmk
+.pte	< 1, PTE$K_ALL, 0, 3000>
+.sbr	2000
+.slr	3
+.p0br	80000000
+.p0lr	2
+
+
+.console	set page exe$ubase to exe$uend prot=pte$k_ur
+.console 	set radix dec
+.console 	clear sym/temp
+.console 	set radix hex
+
+.print   "To test, EXAM ASCII DESC TST to see the whole"
+
+.microkernel
+.p1vector
+
+.if defined("$$$_NORMAL") = 0 .include   "ssdef.asm"
+.if file_exists("forth.asm") .include	"forth.asm"
+
+.opdef		; opcode definition
+
+
+Operands/expressions in .byte/.long/...  :
+  #1
+  0
+  @#exe$tx_ready
+  #VAX$PR_RXDB
+  -(sp)
+  (sp)+
+  r0
+  r1
+
+  b^0C(sp)
+  b^10(sp)
+
+  (ap)+
+  #0FF
+  #'-'
+  #0.0
+
+
