@@ -81,6 +81,9 @@ runtime/*.html
 *.info
 cov
 
+# cachegrind analysis
+cachegrind.out.*
+
 # AFL tests
 afl/
 
