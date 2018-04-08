@@ -1,0 +1,295 @@
+ReVAX Testing
+-------------------------------------------------------------------------------
+
+Overview
+---
+Much of the code is quite pedestrian and easy to test -- furthermore, if it
+were a little bit wrong, it would be easy to fix and in most cases also easy
+to discover.
+
+The hard-to-find bugs lurk in the microcode and in the operand decoding/
+validation/disassembly/assembly and, since VAX floating-point is different
+from IEEE fp, in the VAX floating-point routines.
+
+The undefined sanitizers in gcc and clang are used during tests, to ensure that
+the code stays within the (mostly unmarked) straight and narrow path of
+portable and valid C code.
+
+Apart from ...<what?>...
+
+
+Some tests may crash -- in that case it is imperative to preserve output.
+The easiest way is to output to stderr.  It's a bit harder to switch stdout to
+line buffering but that's also pretty easy.
+
+The code is ambivalent: some uses stderr, some uses stdout.  FIXME!
+
+See SQLite for inspiration.
+
+
+
+Manual vs automated
+---
+It is still *very* manual.  A few tests can run entirely automatically but
+most can't.
+
+Moreover, some tests are quite long-running and buildbot/jenkins might kill
+the job too early!  (test-fp + everything with AFL.)
+
+
+
+Test types
+---
+Built-in test cases, built-in random tests, built-in systematic tests (of lots
+of bit patterns).
+
+Output to stdout, compare with known-good output.
+
+Fuzz testing -- with American Fuzzy Lop.  Use the built-in test patterns to
+seed the fuzz testing.  Should also use the minimization tools provided with
+American Fuzzy Lop... this is not implemented yet.
+
+coverage -- to verify that the tests are comprehensive enough.
+
+Mutation testing -- not implemented yet!
+
+Todo: cycle through ALL 4-byte operands?  All 5-byte operands?
+  op_asm/op_dis are too slow for that.
+  Cycling through all 2-byte opspecs, though, should be eminently doable.
+
+  Round-trip tests bytes-->string-->bytes?
+
+
+
+Built-in tests
+---
+
+
+Output to stdout, compare with known-good output
+---
+
+
+
+Code and make targets
+---
+misc/test-big-int.c
+misc/test-fp.c
+misc/test-op.c
+misc/test-dis-uop.c
+
+misc/test-alu.c       -- NOT YET WRITTEN
+misc/test-analyze.c   -- NOT YET WRITTEN
+
+ ---
+
+'make test-big-int'	--> ./test-big-int
+'make test-fp'		--> ./test-fp
+'make test-op'		--> ./test-op
+'make test-dis-uop'	--> ./test-dis-uop
+'make test-alu'		-- NOT YET WRITTEN
+'make test-analyze'	-- NOT YET WRITTEN
+
+'make tests'		compile all the above tests
+
+
+'make run-big-int'
+'make run-fp'
+'make run-op'
+'make run-dis-uop'	-- NOT YET WRITTEN
+'make run-alu'		-- NOT YET WRITTEN
+'make run-analyze'	-- NOT YET WRITTEN
+
+'make run-tests'	run all the above tests
+
+
+'make afl-test-big-int'	--> ./afl-test-big-int
+'make afl-test-fp'	--> ./afl-test-fp
+'make afl-test-op'	--> ./afl-test-op
+'make afl-test-alu'	-- NOT YET WRITTEN
+'make afl-test-analyze'	-- NOT YET WRITTEN
+
+
+
+VAX fp
+---
+VAX fp conversion to/from strings is tested separately in test-fp.c.  All 2^32
+bit patterns that an F floating-point value can have are tested.  Many millions
+of random D/G/H floating-point bit patterns + 100,000+ particularly sensitive
+bit patterns are tested.  There is a single F floating-point value and no D/G/H
+floating-point values that can't be round-tripped from bit pattern to string and
+back.  All other values can round-trip to within 1ULP -- and this might be a
+bug.  Maybe they should all be able to round-trip exactly?  Maybe there's a
+rounding subtlety that is wrong in the code?
+
+The VAX fp conversion routines are tested in misc/test-fp.c.
+
+
+
+Operand handling
+---
+Operand encoding/decoding/validation code is machine-generated, based on a
+short file containing a high-level specification.  The translation is completely
+straight-forward: one line in the file corresponds to a pattern match attempt
+in the generated code (each pattern match attempt taking multiple lines).
+The linear top-to-bottom matching means that most generated code lines are
+executed many times, so the risk of undiscovered bugs is quite small with
+basic testing of all the addressing modes.
+
+test-op ... <what?> ...
+
+
+
+Assembler
+---
+only a barebones assembler implemented -- realized while writing it that
+operand handling was a lot more involved than expected, switched gears to using
+machine-generated code for it (which is pretty much done now!).  Haven't gotten
+around to using the machine-generated operand handling in the assembler yet.
+
+Haven't implemented near enough directives/pseudo-instructions yet.
+
+NOT SYSTEMATICALLY TESTED YET!
+
+
+
+Disassembler
+---
+only a barebones disassembler implemented -- realized while writing it that
+operand handling was a lot more involved than expected, switched gears to using
+machine-generated code for it (which is pretty much done now!).  Haven't gotten
+around to using the machine-generated operand handling in the disassembler yet.
+
+Sketched code to disassemble much, much smarter.  This is more or less required
+for disassembling the ka655x.bin "BIOS".
+
+Some of the current operand disassembly (regarding labels, and regarding
+the way immediates are written) is primitive/incomplete.
+
+NOT SYSTEMATICALLY TESTED YET!
+
+
+
+µops
+---
+There is a tool ('uop') that translates from VAX assembler to µops.  It is useful
+both for exploration of the µops system, for example creation for documentation
+purposes, and for testing of the operand decoding for the simulator.
+
+NOT WRITTEN YET!
+
+
+
+Simulator
+---
+NOT SYSTEMATICALLY TESTED YET!
+
+
+
+ALU
+---
+Not quite implemented yet.
+
+
+
+Interrupt/exception handling
+---
+Not implemented yet.
+
+
+
+Load/store, translation, access control, interlocked
+---
+Load/store (and unaligned access!) is barely implemented yet.
+
+
+
+Bus access, devices
+---
+Bus access cycles + device support is not implemented yet.
+
+
+
+Microcode
+---
+There is no microcode testing yet.
+
+
+
+Address generation
+---
+Involves operand decoding AND microcode.  Not tested yet.
+
+
+
+Test costs, errors found
+---
+test-big-int was easy and things Just Worked.
+
+test-fp was difficult to write because it required understanding lots of general
+floating-point details and lots of VAX floating-point details.  Also required
+interfacing with the 'mpfr' library, which also took some time to figure out.
+
+Required implementing nextafter() for VAX floating-point types.
+
+test-dis-uop -- really quick to write and test, once I had figured out precisely
+what the µop instruction set should look like.
+
+Lots of little errors found with test-op, mainly in op_asm.  Took a long time
+to write all the test cases.  Examples of errors found were:
+ - parse.h, the way the API was used was often not quite right (not enough
+   parse_begin/parse_rollback/parse_commit + parse_ok not always set to false
+   where needed)
+ - parse_bigint() was buggy/incomplete
+ - parse_bigint(), didn't test correctly that the immediate fit into the
+   appropriate number of bytes (all upper bits either 0 or 1)
+ - parse_fp() wasn't written yet (but it was easy to write and no bugs were found in it)
+ - parse_reg() used parse_symbol() (wrapped in transactions) to check individually
+   for each register name -- with the result that 'r1' matched 'r11' with
+   predictably bad results.
+   Switched to parse_id() followed by linear search in array of register names.
+   That worked immediately.
+ - parse_lit6() had a couple of small bit shifting/masking errors
+ - op_asm_vax() didn't use maximal munch -- it sometimes recognized didn't see
+   the entire operand.  This was fixed by rearranging a few lines in operands.spec.
+   I wasted a couple of days thinking I had to rewrite parts of operands.pl to
+   generate smarter matching code -- and I was totally wrong.
+
+
+op_dis turned out to be very quick and easy to test with very few problems found:
+ - pcrel() wasn't written yet
+ - expand_lit6() had two small bugs (h fp didn't shift the fraction quite
+   enough + shifting the (signed) int8_t literal that much was undefined
+   behaviour). 
+
+op_sim, no bugs found, easy to test
+
+op-val, no bugs found, easy to test
+
+ALU -- NOT WRITTEN/TESTED YET
+analyze -- NOT WRITTEN/TESTED YET
+
+asm -- NOT WRITTEN/TESTED YET
+dis -- NOT WRITTEN/TESTED YET
+uop -- NOT WRITTEN/TESTED YET
+sim -- NOT WRITTEN/TESTED YET
+
+
+
+Conclusion
+---
+Unit tests are awesome!  Round-trip tests are awesome!  Testing all possible
+values is awesome(if there are not too many of them)!  Lots of random tests are
+awesome!  Output to stdout and comparison with known good output is awesome!
+
+American Fuzzy Lop is awesome!
+
+gcc/clang's sanitizers are awesome!
+
+GNU Make and makefiles are not so awesome -- I should probably look into trying
+'meson'.
+
+Writing test code is really, really boring but the payoff is really, really nice.
+
+Modifying test code is sweet and easy, once it's been written.
+
+
