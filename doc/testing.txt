@@ -259,7 +259,7 @@ op_dis turned out to be very quick and easy to test with very few problems found
  - pcrel() wasn't written yet
  - expand_lit6() had two small bugs (h fp didn't shift the fraction quite
    enough + shifting the (signed) int8_t literal that much was undefined
-   behaviour). 
+   behaviour).
 
 op_sim, no bugs found, easy to test
 

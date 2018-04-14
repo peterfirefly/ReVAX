@@ -1,4 +1,4 @@
-/* Copyright 2018  Peter Lund <firefly@vax64.dk>\
+/* Copyright 2018  Peter Lund <firefly@vax64.dk>
 
    Licensed under GPL v2.
 
@@ -10,7 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "shared.h"
+#include "macros.h"
 
 #include "vax-instr.h"
 #include "vax-ucode.h"

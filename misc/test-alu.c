@@ -1,4 +1,4 @@
-/* Copyright 2018  Peter Lund <firefly@vax64.dk>\
+/* Copyright 2018  Peter Lund <firefly@vax64.dk>
 
    Licensed under GPL v2.
 
@@ -13,6 +13,13 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+
+
+//#include "vax-ucode.h"
+
+/***/
+
 
 /* flags -- reading */
 #define N(x)	(((x) >> 3) & 1)
@@ -546,7 +553,7 @@ void help()
 }
 
 
-int main(int argc, char argv[argc])
+int main(int argc, char *argv[argc])
 {
 #ifdef __AFL_HAVE_MANUAL_CONTROL
 	while (__AFL_LOOP(1000)) {

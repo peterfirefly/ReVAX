@@ -15,34 +15,88 @@ SAN-GCC=-fsanitize=undefined,leak
 CLANG=clang-5.0
 GCC=gcc
 
+CPP = cpp	# may need to override on OS X, where 'cpp' is a clang program
+
 # avoid Dropbox folders, possibly also SSD and rotating rust (depending on
 # cache settings for the file system).
 AFL_OUT=~/tmp/
 
 ###
 
+# version info macros
+
+VERSION=v0.1
+GITHASH=$(shell cat .git/refs/heads/master)
+PLATFORM=$(shell . /etc/lsb-release; echo $$DISTRIB_DESCRIPTION)
+NOW=$(shell date --utc '+%Y-%m-%d %H:%M:%S') UTC
+REVAXURL=http://github.com/peterfirefly/revax
+CCVER=$(shell $(CC) --version | head -n1)
+
+###
+
+DEF=-DVERSION="\"$(VERSION)\"" -DGITHASH="\"$(GITHASH)\"" -DNOW="\"$(NOW)\"" -DPLATFORM="\"$(PLATFORM)\"" \
+    -DCCVER="\"$(CCVER)\"" -DREVAXURL="\"$(REVAXURL)\""
+
+###
+
+
+# macro to help with C dependencies
+#
+# This:
+#   $(call DEP,asm,src/asm.c)
+#
+# expands to something like:
+#   asm:  src/asm.c src/shared.h src/parse.h vax-instr.h src/fp.h src/big-int.h \
+#   src/op-support.h op-asm.h op-val.h
+#
+# The macro asks the C preprocessor) to go through its second argument and
+# check which (non-system) header files get #include'd.
+#
+# It is not superfast because it actually invokes the C preprocessor every time
+# it is called but it is simpler than caching the dependency list in a file.
+#
+# If a file #include's a generated file that doesn't currently exist, the C
+# preprocessor will guess that it should exist in the current directory.
+# Adding '-Isrc' to cpp's command line doesn't help.
+#
+# There is a workaround for that issue further down in this makefile where each
+# of the incorrect xxx.h filenames is 1) marked PHONY and 2) depends on the
+# real filename in src/.
+
+DEP=$(subst \, ,$(shell $(CPP) -Isrc -MM $(2) -MG -MT $(1)))
+
+###
+
 help:
 	@echo 'make all | asm|dis|sim | cov |snips|tables|stats | clean|distclean'
 	@echo ''
-	@echo '  asm      assembler'
-	@echo '  dis      disassembler'
-	@echo '  sim      simulator'
+	@echo '  asm          assembler (revax-asm)'
+	@echo '  dis          disassembler (revax-dis)'
+	@echo '  sim          simulator (revax-sim)'
 	@echo ''
 	@echo '  *.cov        compile for coverage analysis'
 	@echo '  *.dbg        compile with debug symbols'
 	@echo '  *.san.clang  compile with clang undefined behaviour sanitizer'
 	@echo '  *.san.gcc    compile with gcc undefined behaviour sanitizer'
 	@echo ''
-	@echo '  cov      create HTML report of coverage after a run'
+	@echo '  cov          create HTML report of coverage after a run'
 	@echo ''
-	@echo '  snips    small VAX test programs (runtime/test*.bin)'
-	@echo '  tables   generated files with tables that describe VAX instructions'
-	@echo '  ops      generated files that handle operands for asm/dis/sim'
-	@echo '  stats    how much code is there?'
+	@echo '  snips        small VAX test programs (runtime/test*.bin)'
+	@echo '  tables       generated files with tables that describe VAX instructions'
+	@echo '  ops          generated files that handle operands for asm/dis/sim'
+	@echo '  stats        how much code is there?'
 	@echo ''
-	@echo '  fixme    check for FIXMEs'
-	@echo '  spaces   check for trailing spaces'
-	@echo '  vars     print out makefile variables'
+	@echo '  test-*       various test programs'
+	@echo '  afl-test-*   the same test programs built for American Fuzzy Lop'
+	@echo '  run-test-*   run the test programs'
+	@echo '  afl-run-*    run the afl-test-* versions under American Fuzzy Lop'
+	@echo ''
+	@echo '  misc         build misc code'
+	@echo ''
+	@echo '  fixme        check for FIXMEs'
+	@echo '  spaces       check for trailing spaces'
+	@echo '  reserved     check for reserved identifiers'
+	@echo '  vars         print out makefile variables'
 	@echo ''
 	@echo 'see doc/readme.txt for more information.'
 	@echo ''
@@ -50,6 +104,11 @@ help:
 .PHONY:	help all  tables ops snips  stats  spaces vars  clean distclean
 
 all:	asm dis sim  snips
+
+asm:	revax-asm
+dis:	revax-dis
+sim:	revax-sim
+uop:	revax-uop
 
 ###
 
@@ -64,7 +123,14 @@ vars:
 	@echo ''
 	@echo 'AFL_PATH=$(AFL_PATH)'
 	@echo 'PATH=$(PATH)'
-
+	@echo ''
+	@echo 'VERSION=$(VERSION)'
+	@echo 'GITHASH=$(GITHASH)'
+	@echo 'PLATFORM=$(PLATFORM)'
+	@echo 'NOW=$(NOW)'
+	@echo 'CCVER=$(CCVER)'
+	@echo ''
+	@echo 'DEF=$(DEF)'
 
 ###
 
@@ -84,24 +150,32 @@ fixme:
 
 ###
 
-# These three targets are the *actual* end product we care about
-
-asm:	src/asm.c src/shared.c src/vax-instr.h   src/shared.o
-	$(CC) $(CFLAGS) $< src/shared.o -o $@
-
-dis:	src/dis.c src/shared.c src/vax-instr.h   src/shared.o
-	$(CC) $(CFLAGS) $< src/shared.o -o $@
-
-sim:	src/sim.c src/shared.h src/fragments.h src/dis-uop.h	\
-	src/vax-instr.h src/vax-ucode.h src/vax-fraglists.h
-	$(CC) $(CFLAGS) $< -o $@
+reserved:	tables ops
+	@ctags misc/*.[ch] src/*.[ch] ods2/ods2-firefly.c
+	@misc/check-reserved.pl tags
 
 ###
 
-# Shared routines -- mainly string handling and parsing
+tstdep:
+	@echo $(call DEP,asm,src/asm.c)
 
-src/shared.o:	src/shared.c src/shared.h
-	$(CC) -c $(CFLAGS) $< -o $@
+###
+
+# These three targets are the *actual* end product we care about
+
+#asm:	src/asm.c src/shared.h src/vax-instr.h   src/op-asm.h src/op-val.h
+$(call DEP,revax-asm,src/asm.c)
+	$(CC) $(CFLAGS) $(DEF) $< -Isrc -o $@
+
+#dis:	src/dis.c src/shared.h src/vax-instr.h   src/op-dis.h src/op-val.h
+$(call DEP,revax-dis,src/dis.c)
+	$(CC) $(CFLAGS) $(DEF) $< -Isrc -o $@
+
+#sim:	src/sim.c src/shared.h src/fragments.h src/dis-uop.h	\
+#	src/vax-instr.h src/vax-ucode.h src/vax-fraglists.h	\
+#	src/op-sim.h src/op-val.h
+$(call DEP,revax-sim,src/sim.c)
+	$(CC) $(CFLAGS) $(DEF) $< -Isrc -o $@
 
 ###
 
@@ -110,8 +184,9 @@ src/shared.o:	src/shared.c src/shared.h
 # needs to be in C because it needs to access µcode labels (#define'd in
 # src/vax-ucode.h included by src/fragments.h) and the list fragment groups in
 # src/fragments.h).
-src/fragtable:	src/fragtable.c src/shared.h src/fragments.h	\
-	 src/vax-instr.h src/vax-ucode.h
+#src/fragtable:	src/fragtable.c src/fragments.h	\
+#	 src/vax-instr.h src/vax-ucode.h
+$(call DEP,src/fragtable,src/fragtable.c)
 	$(CC) $(CFLAGS) $< -o $@
 
 ###
@@ -135,7 +210,7 @@ src/fragtable:	src/fragtable.c src/shared.h src/fragments.h	\
 define COV_TEMPLATE =
 .PHONY:	$(1).cov
 $(1).cov:
-	rm -rf $(1) src/shared.o $(1).gcda $(1).gcno cov.info
+	rm -rf $(1) $(1).gcda $(1).gcno cov.info
 	$(MAKE) CFLAGS='$(CFLAGS) $(COV)' $(1)
 endef
 
@@ -162,7 +237,7 @@ cov:
 define DBG_TEMPLATE =
 .PHONY:	$(1).dbg
 $(1).dbg:
-	rm -f $(1) src/shared.o
+	rm -f $(1)
 	$(MAKE) CFLAGS='$(CFLAGS) $(DBG)' $(1)
 endef
 
@@ -180,13 +255,13 @@ $(eval $(call DBG_TEMPLATE, sim))
 define SAN_TEMPLATE =
 .PHONY:	$(1).san.clang
 $(1).san.clang:
-	rm -f $(1) src/shared.o
+	rm -f $(1)
 	$(MAKE) CC=$(CLANG) CFLAGS='$(CFLAGS) $(SAN-CLANG)' $(1)
 
 
 .PHONY:	$(1).san.gcc
 $(1).san.gcc:
-	rm -f $(1) src/shared.o
+	rm -f $(1)
 	$(MAKE) CC=$(GCC) CFLAGS='$(CFLAGS) $(SAN-GCC)' $(1)
 endef
 
@@ -194,6 +269,40 @@ $(eval $(call SAN_TEMPLATE, asm))
 $(eval $(call SAN_TEMPLATE, dis))
 $(eval $(call SAN_TEMPLATE, sim))
 
+
+###
+
+.PHONY:	misc headers
+misc:	headers cmp-sub fp-ieee sizes-op.o
+
+# most header files should compile as standalone compilation units
+headers:	src/vax-ucode.h src/vax-instr.h
+	$(CC) -c $(CFLAGS) -Isrc src/macros.h
+	$(CC) -c $(CFLAGS) -Isrc src/strret.h
+	$(CC) -c $(CFLAGS) -Isrc src/string-utils.h
+	$(CC) -c $(CFLAGS) -Isrc src/reflow.h
+	$(CC) -c $(CFLAGS) -Isrc src/html.h
+	$(CC) -c $(CFLAGS) -Isrc src/parse.h
+	$(CC) -c $(CFLAGS) -Isrc src/big-int.h
+	$(CC) -c $(CFLAGS) -Isrc src/fp.h
+#	$(CC) -c $(CFLAGS) -Isrc src/dis-uop.h
+	$(CC) -c $(CFLAGS) -Isrc src/op-support.h
+	$(CC) -c $(CFLAGS) -Isrc src/op-asm-support.h
+	$(CC) -c $(CFLAGS) -Isrc src/op-dis-support.h
+	$(CC) -c $(CFLAGS) -Isrc src/op-sim-support.h
+	$(CC) -c $(CFLAGS) -Isrc src/op-val-support.h
+
+
+cmp-sub: misc/cmp-sub.c
+	$(CC) $(CFLAGS) -Isrc $< -o $@
+
+fp-ieee: misc/fp-ieee.c
+	$(CC) $(CFLAGS) -Isrc $< -o $@ -lmpfr -lgmp
+
+$(call DEP, sizes-op.o,misc/sizes-op.c)
+	$(CC) -c $(CFLAGS) -Isrc $< -o $@
+	size $@
+	size -A $@
 
 ###
 
@@ -210,34 +319,72 @@ $(eval $(call SAN_TEMPLATE, sim))
 tests:	test-big-int test-fp test-op test-alu test-analyze test-dis-uop
 
 
-# ordinary built-in tests, compile with -fsanitize=undefined
-test-big-int:	misc/test-big-int.c src/big-int.h src/shared.h	\
-		src/shared.o
-	$(CC) $(CFLAGS) -fsanitize=undefined $< -Isrc src/shared.o -lmpfr -lgmp -o $@
+# ordinary built-in tests, compile with -fsanitize=undefined,leak
 
-test-fp:	misc/test-fp.c src/big-int.h src/shared.h	\
-		src/shared.o
-	$(CC) $(CFLAGS) -fsanitize=undefined $< -Isrc src/shared.o -lmpfr -lgmp -o $@
+#test-big-int:	misc/test-big-int.c src/big-int.h src/shared.h
+$(call DEP,test-big-int,misc/test-big-int.c)
+	$(CC) $(CFLAGS) -g -fsanitize=undefined,leak $< -Isrc -lmpfr -lgmp -o $@
 
-test-op:	misc/test-op.c src/big-int.h src/shared.h	\
-		src/op-support.h src/op-asm.h src/op-dis.h src/op-sim.h src/op-val.h	\
-		src/shared.o
-	$(CC) $(CFLAGS) -fsanitize=undefined $< -Isrc src/shared.o -lmpfr -lgmp -o $@
+#test-fp:	misc/test-fp.c src/big-int.h src/shared.h
+$(call DEP,test-fp,misc/test-fp.c)
+	$(CC) $(CFLAGS) -g -fsanitize=undefined,leak $< -Isrc -lmpfr -lgmp -o $@
 
-test-alu:	misc/test-alu.c src/shared.h			\
-		src/shared.o
-	$(CC) $(CFLAGS) -fsanitize=undefined $< -Isrc src/shared.o -o $@
+#test-op:	misc/test-op.c src/big-int.h src/shared.h	\
+#		src/op-support.h src/op-asm.h src/op-dis.h src/op-sim.h src/op-val.h
+$(call DEP,test-op,misc/test-op.c)
+	$(CC) $(CFLAGS) -g -fsanitize=undefined,leak $< -Isrc -lmpfr -lgmp -o $@
 
-test-analyze:	misc/test-analyze.c src/shared.h		\
-		src/vax-instr.h src/vax-ucode.h			\
-		src/op-support.h src/op-sim.h src/op-val.h	\
-		src/shared.o
-	$(CC) $(CFLAGS) -fsanitize=undefined $< -Isrc src/shared.o -o $@
+#test-alu:	misc/test-alu.c src/shared.h
+$(call DEP,test-alu,misc/test-alu.c)
+	$(CC) $(CFLAGS) -g -fsanitize=undefined,leak $< -Isrc -o $@
 
-test-dis-uop:	misc/test-dis-uop.c src/dis-uop.h src/shared.h	\
-		src/vax-instr.h src/vax-ucode.h			\
-		src/shared.o
-	$(CC) $(CFLAGS) -fsanitize=undefined $< -Isrc src/shared.o -o $@
+#test-analyze:	misc/test-analyze.c src/shared.h		\
+#		src/vax-instr.h src/vax-ucode.h			\
+#		src/op-support.h src/op-sim.h src/op-val.h
+$(call DEP,test-analyze,misc/test-analyze.c)
+	$(CC) $(CFLAGS) -g -fsanitize=undefined,leak $< -Isrc -o $@
+
+#test-dis-uop:	misc/test-dis-uop.c src/dis-uop.h src/shared.h	\
+#		src/vax-instr.h src/vax-ucode.h
+$(call DEP,test-dis-uop,misc/test-dis-uop.c)
+	$(CC) $(CFLAGS) -g -fsanitize=undefined,leak $< -Isrc -o $@
+
+
+
+.PHONY:	tests-nosan
+tests-nosan:	test-big-int-nosan test-fp-nosan test-op-nosan test-alu-nosan test-analyze-nosan test-dis-uop-nosan
+
+
+# built-in tests/timing, compiled without sanitizers or assertions
+
+
+#test-big-int:	misc/test-big-int.c src/big-int.h src/shared.h
+$(call DEP,test-big-int-nosan,misc/test-big-int.c)
+	$(CC) $(CFLAGS) -DNDEBUG -g $< -Isrc -lmpfr -lgmp -o $@
+
+#test-fp:	misc/test-fp.c src/big-int.h src/shared.h
+$(call DEP,test-fp-nosan,misc/test-fp.c)
+	$(CC) $(CFLAGS) -DNDEBUG -g $< -Isrc -lmpfr -lgmp -o $@
+
+#test-op:	misc/test-op.c src/big-int.h src/shared.h	\
+#		src/op-support.h src/op-asm.h src/op-dis.h src/op-sim.h src/op-val.h
+$(call DEP,test-op-nosan,misc/test-op.c)
+	$(CC) $(CFLAGS) -DNDEBUG -g $< -Isrc -lmpfr -lgmp -o $@
+
+#test-alu:	misc/test-alu.c src/shared.h
+$(call DEP,test-alu-nosan,misc/test-alu.c)
+	$(CC) $(CFLAGS) -DNDEBUG -g $< -Isrc -o $@
+
+#test-analyze:	misc/test-analyze.c src/shared.h		\
+#		src/vax-instr.h src/vax-ucode.h			\
+#		src/op-support.h src/op-sim.h src/op-val.h
+$(call DEP,test-analyze-nosan,misc/test-analyze.c)
+	$(CC) $(CFLAGS) -DNDEBUG -g $< -Isrc -o $@
+
+#test-dis-uop:	misc/test-dis-uop.c src/dis-uop.h src/shared.h	\
+#		src/vax-instr.h src/vax-ucode.h
+$(call DEP,test-dis-uop-nosan,misc/test-dis-uop.c)
+	$(CC) $(CFLAGS) -DNDEBUG -g $< -Isrc -o $@
 
 
 
@@ -291,14 +438,19 @@ afl-tests:	afl-test-big-int afl-test-fp afl-test-op #afl-test-alu afl-test-analy
 
 
 # ordinary built-in tests, compile with -fsanitize=undefined
-afl-test-big-int:	misc/test-big-int.c src/big-int.h src/shared.h
-	afl-clang-fast $(CFLAGS) -fsanitize=undefined -Isrc $< src/shared.c -lmpfr -lgmp -o $@
+#afl-test-big-int:	misc/test-big-int.c src/big-int.h src/shared.h check-afl
+$(call DEP,afl-test-big-int,misc/test-big-int.c) check-afl
+	afl-clang-fast $(CFLAGS) -fsanitize=undefined,leak -Isrc $< -lmpfr -lgmp -o $@
 
-afl-test-fp:	misc/test-fp.c src/big-int.h src/shared.h
-	afl-clang-fast $(CFLAGS) -fsanitize=undefined -Isrc $< src/shared.c -lmpfr -lgmp -o $@
+#afl-test-fp:	misc/test-fp.c src/big-int.h src/shared.h check-afl
+$(call DEP,afl-test-fp,misc/test-fp.c) check-afl
+	afl-clang-fast $(CFLAGS) -fsanitize=undefined,leak -Isrc $< -lmpfr -lgmp -o $@
 
-afl-test-op:	misc/test-op.c src/big-int.h src/shared.h
-	afl-clang-fast $(CFLAGS) -fsanitize=undefined -Isrc $< src/shared.c -lmpfr -lgmp -o $@
+#afl-test-op:	misc/test-op.c src/big-int.h src/shared.h		\
+#		src/vax-ucode.h src/op-support.h src/op-asm.h src/op-dis.h src/op-sim.h src/op-val.h \
+#		check-afl
+$(call DEP,afl-test-op,misc/test-op.c) check-afl
+	afl-clang-fast $(CFLAGS) -fsanitize=undefined,leak -Isrc $< -lmpfr -lgmp -o $@
 
 
 
@@ -312,7 +464,7 @@ AFL_BIG=./afl-test-big-int
 
 # pseudo-random tests (passed via stdin), many kinds
 AFL_BIG_OUT=$(AFL_OUT)/big-int-out
-afl-run-big-int:	afl-test-big-int
+afl-run-big-int:	afl-test-big-int check-afl
 	./afl-test-big-int --output-add
 	./afl-test-big-int --output-neg
 	./afl-test-big-int --output-shl
@@ -331,7 +483,7 @@ afl-run-big-int:	afl-test-big-int
 	$(AFL_FUZZ) -T 'big-int clz'      -i afl/big-int/clz      -o $(AFL_BIG_OUT)/clz      -- $(AFL_BIG) --test-clz
 	$(AFL_FUZZ) -T 'big-int shortmul' -i afl/big-int/shortmul -o $(AFL_BIG_OUT)/shortmul -- $(AFL_BIG) --test-shortmul
 
-afl-run-fp:		afl-test-fp
+afl-run-fp:		afl-test-fp check-afl
 	./afl-test-fp --output-from-str
 	./afl-test-fp --output-to-str
 	#
@@ -341,7 +493,7 @@ afl-run-fp:		afl-test-fp
 	$(AFL_FUZZ) -T 'fp from-str' -i afl/from-str -o afl/from-str-out -- ./afl-test-fp --test-from-str
 	$(AFL_FUZZ) -T 'fp to-str'   -i afl/to-str   -o afl/to-str-out   -- ./afl-test-fp --test-to-str
 
-afl-run-op:		afl-test-op
+afl-run-op:		afl-test-op check-afl
 	./afl-test-op --output
 	#
 	mkdir -p afl/
@@ -356,6 +508,24 @@ test-clean:
 	@rm -f     test-big-int     test-fp     test-op     test-alu     test-analyze     test-dis-uop
 	@rm -f afl-test-big-int afl-test-fp afl-test-op afl-test-alu afl-test-analyze afl-test-dis-uop
 	@rm -rf afl
+	@rm -f     test-big-int-nosan test-fp-nosan     test-op-nosan     test-alu-nosan     \
+	           test-analyze-nosan test-dis-uop-nosan
+
+###
+
+# DEP macro doesn't know that missing generated files are supposed to live in
+# the src/ directory.  Make some dummy dependencies to work around that.
+
+.PHONY:	vax-instr.h vax-ucode.h vax-fraglists.h
+vax-instr.h:	src/vax-instr.h
+vax-ucode.h:	src/vax-ucode.h
+vax-fraglists.h:src/vax-fraglists.h
+
+.PHONY:	op-asm.h op-dis.h op-sim.h op-val.h
+op-asm.h:	src/op-asm.h
+op-dis.h:	src/op-dis.h
+op-sim.h:	src/op-sim.h
+op-val.h:	src/op-val.h
 
 ###
 
@@ -438,46 +608,68 @@ runtime/%.bin: runtime/%.c
 stats:	tables ops
 	@echo 'Total code size (without test code and experiments)'
 	@echo '---------------------------------------------------'
-	@wc src/sim.c src/asm.c src/dis.c src/dis-uop.h src/shared.[ch]	\
-	   src/vax-instr.h src/vax-ucode.h				\
-	   src/op-asm.h src/op-dis.h src/op-sim.h src/op-val.h		\
-	   src/uasm.pl src/instr.pl src/vax-instr.pl 			\
-	   src/operands.pl 						\
-	   src/fragtable.c						\
-	   src/ucode.vu src/uops.spec src/operands.spec | misc/totals.pl
+	@wc src/asm.c src/dis.c src/sim.c				\
+	    \
+	    src/macros.h src/strret.h src/string-utils.h src/html.h src/reflow.h \
+	    src/parse.h src/big-int.h src/fp.h				\
+	    src/fragments.h						\
+	    src/dis-uop.h						\
+	    src/op-support.h src/op-lit6.h				\
+	    src/op-asm-support.h src/op-dis-support.h src/op-sim-support.h src/op-val-support.h	\
+	    \
+	    src/vax-instr.h src/vax-ucode.h				\
+	    src/vax-fraglists.h						\
+	    src/op-asm.h src/op-dis.h src/op-sim.h src/op-val.h		\
+	    \
+	    src/fragtable.c						\
+	    src/vax-instr.pl 						\
+	    src/instr.pl src/uasm.pl src/operands.pl		 	\
+	    src/ucode.vu src/uops.spec src/operands.spec | misc/totals.pl
 	@echo ''
 	@echo ''
 	@echo 'Generated code'
 	@echo '--------------'
-	@wc src/vax-instr.h src/vax-instr.pl src/vax-ucode.h src/vax-fraglists.h \
+	@wc src/vax-instr.pl src/vax-instr.h src/vax-ucode.h src/vax-fraglists.h \
 	    src/op-asm.h src/op-dis.h src/op-sim.h src/op-val.h | misc/totals.pl
 	@echo ''
 	@echo ''
 	@echo 'Hand-written code'
 	@echo '-----------------'
-	@wc src/instr.pl src/uasm.pl src/operands.pl src/fragtable.c	\
-	    src/asm.c src/dis.c src/sim.c src/dis-uop.h src/shared.[ch]	\
+	@wc src/asm.c src/dis.c src/sim.c				\
+	    src/macros.h src/strret.h src/string-utils.h src/html.h src/reflow.h \
+	    src/parse.h src/big-int.h src/fp.h				\
+	    src/fragments.h						\
+	    src/dis-uop.h						\
+	    src/op-support.h src/op-lit6.h				\
+	    src/op-asm-support.h src/op-dis-support.h src/op-sim-support.h src/op-val-support.h	\
+	    src/fragtable.c src/instr.pl src/operands.pl src/uasm.pl	\
 	    src/ucode.vu src/uops.spec src/operands.spec | misc/totals.pl
 	@echo ''
 	@echo ''
 	@echo 'VAX simulator, C code'
 	@echo '---------------------'
-	@wc src/sim.c src/shared.c src/shared.h src/fragments.h		\
-	    src/vax-instr.h src/vax-ucode.h src/vax-fraglists.h		\
+	@wc src/sim.c							\
+	    src/macros.h src/strret.h					\
+	    src/fragments.h						\
 	    src/dis-uop.h						\
+	    src/op-support.h src/op-lit6.h src/op-sim-support.h src/op-val-support.h \
+	    src/vax-instr.h src/vax-ucode.h src/vax-fraglists.h		\
 	    src/op-sim.h src/op-val.h | misc/totals.pl
 	@echo ''
 	@echo ''
 	@echo 'VAX simulator, hand-written code'
 	@echo '--------------------------------'
-	@wc src/sim.c src/shared.c src/shared.h src/fragments.h		\
+	@wc src/sim.c							\
+	    src/macros.h src/strret.h					\
+	    src/fragments.h						\
 	    src/dis-uop.h						\
+	    src/op-support.h src/op-lit6.h src/op-sim-support.h src/op-val-support.h \
 	    src/ucode.vu src/uops.spec src/operands.spec | misc/totals.pl
 	@echo ''
 	@echo ''
 	@echo 'Generators'
 	@echo '----------'
-	@wc src/uasm.pl src/instr.pl src/fragtable.c src/operands.pl	\
+	@wc  src/fragtable.c src/instr.pl src/operands.pl src/uasm.pl 	\
 	  | misc/totals.pl
 	@echo ''
 	@echo ''
@@ -519,8 +711,13 @@ stats:	tables ops
 	@mkdir -p tmp
 	@# use tmp dir to control which files gets counted, use a different
 	@# name for the microcode so it counts as "asm".
-	@cp src/sim.c src/asm.c src/dis.c src/shared.[ch]		\
-	    src/fragments.h src/dis-uop.h					\
+	@cp src/asm.c src/dis.c src/sim.c				\
+	    src/macros.h src/strret.h src/string-utils.h src/html.h src/reflow.h \
+	    src/parse.h src/big-int.h src/fp.h				\
+	    src/fragments.h						\
+	    src/dis-uop.h						\
+ 	    src/op-support.h src/op-lit6.h				\
+	    src/op-asm-support.h src/op-dis-support.h src/op-sim-support.h src/op-val-support.h	\
 	    src/instr.pl src/uasm.pl src/operands.pl			\
 	    src/fragtable.c						\
 	    tmp
@@ -536,19 +733,23 @@ stats:	tables ops
 ###
 
 clean:	test-clean
-	-@rm -f *.o src/*.o ods2/*.o    			\
-	   a.out asm dis sim ods2-read    			\
+	-@rm -f	\
+	   *.o src/*.o misc/*.o ods2/*.o    			\
+	   *.s src/*.s misc/*.s ods2/*.s			\
+	   revax-asm revax-dis revax-sim revax-uop		\
+	   a.out ods2-read cmp-sub fp-ieee			\
 	   src/regalloc						\
 	   src/fragtable					\
 	   src/vax-instr.h src/vax-instr.pl src/vax-ucode.h	\
 	   src/vax-fraglists.h					\
 	   src/op-asm.h src/op-dis.h src/op-sim.h src/op-val.h	\
 	   runtime/test*.o runtime/test*.bin runtime/test.s	\
-	   misc/*.o misc/*.s					\
 	   *.lst *.raw						\
 	   *.gcno *.gcda *.info src/*.gcno src/*.gcda
 	-@rm -rf cov/
 	-@rm -rf runtime/*asm runtime/*.lst runtime/*.html
+	-@rm -f  cachegrind.out.*
+	-@rm -f  tags
 
 distclean:	clean
 	-@rm -f *~ doc/*~ src/*~ tables/*~ ods2/*~ runtime/*~  misc/*~

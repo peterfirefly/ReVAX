@@ -147,13 +147,13 @@ With ELF and VMS binaries, it is not actually necessary to emulate actual syscal
 
 EVax
 ---
-The EVax VAX simulator seems to implement a "microkernel OS" that lets VAX
+The eVAX VAX simulator seems to implement a "microkernel OS" that lets VAX
 binaries run under userspace emulation instead of full host emulation.  I don't
 really know, but it looks like it's an emulation of VMS.  The code is not
 particularly easy to follow, not because it is ugly but because the documentation
 is quite sparse.
 
-The EVax strategy is to implement lots of named entry points that -- somehow --
+The eVAX strategy is to implement lots of named entry points that -- somehow --
 get linked to the executable at load-time.  All these named entry points are
 stubs that use the XFC "instruction" to trap to the simulator.
 
@@ -187,7 +187,7 @@ I want that fun back.
 
 References
 ---
-EVax -- URL + source file/line number references for loader/linker
+eVAX -- URL + source file/line number references for loader/linker
 [FIXME]
 
 

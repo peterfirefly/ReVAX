@@ -1,4 +1,4 @@
-/* Copyright 2018  Peter Lund <firefly@vax64.dk>\
+/* Copyright 2018  Peter Lund <firefly@vax64.dk>
 
    Licensed under GPL v2.
 
@@ -53,7 +53,6 @@ struct fields {
 
 #include "op-support.h"
 
-#include "shared.h"
 
 struct xxx {
 	int	cnt;

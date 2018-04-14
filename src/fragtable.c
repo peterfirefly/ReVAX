@@ -23,7 +23,7 @@
 #include <string.h>
 #include <time.h>
 
-#include "shared.h"
+#include "macros.h"
 #include "vax-instr.h"
 #include "fragments.h"
 
@@ -34,7 +34,7 @@ int fraggrp(const char *optype)
 			return i;
 
 	fprintf(stderr, "No fragment group for operand type '%s'.\n", optype);
-	assert(0);
+	exit(1);
 }
 
 

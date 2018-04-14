@@ -212,6 +212,58 @@ sub dump_file() {
 }
 
 
+# FIXME: check syntax at the same time?
+sub output_file() {
+	my $section = undef;
+	while (<>) {
+		# kill trailing \n
+		chomp;
+
+		my $line = $_;
+
+		# section header?
+		if (/^\[(\S+)\]$/) {
+#			if (defined $section) {
+#printf "end of %s, %d elmts\n", $section, scalar @{$file{$section}};
+#			}
+
+			print "$_\n";
+			$section = $1;
+			next;
+		}
+
+		# comment line (can't have anything else on the line)
+		s/^\s*#.*$//;
+
+		# empty line?
+		s/^\s+//;
+		s/\s+$//;
+		if ($_ eq "") {
+			print "$line\n";
+			next;
+		}
+
+		if ($section =~ /^(asm|dis)/) {
+			if (/^(.*?)\|(.*)$/) {
+				my ($pattern, $action) = ($1, $2);
+
+				$action =~ s/_//g;
+				$action =~ s/<[a-zA-Z0-9_]+:pcrel>/reladdr/g;
+				$action =~ s/<[a-zA-Z0-9_]+:addr>/absaddr/g;
+				$action =~ s/<([a-zA-Z0-9_]+):([a-zA-Z0-9_]+)>/$1/g;
+				$action =~ s/<width>/W/g;
+				print "$pattern|$action\n";
+			} else {
+				print "** $line\n";
+			}
+		} else {
+			print "$line\n";
+		}
+	}
+}
+
+
+
 ########
 #
 # verify patterns -- the patterns/fields have to be the same in all sections
@@ -369,12 +421,16 @@ sub handle_asm_syntax($) {
 	printf "\n";
 	printf "   (uses the transactional recursive descent parser)\n";
 	printf "\n";
+	printf "   b[]     filled in by function\n";
+	printf "   pc      address of operand\n";
+	printf "   width   operand size\n";
+	printf "   ifp     integer/fp type of operand\n";
 	printf "   ---\n";
 	printf "   positive: how many bytes the operand consumed\n";
 	printf "   -1: reserved addressing mode\n";
 	printf "   <-1, 0 and >9 are illegal return values\n";
 	printf " */\n";
-	printf "STATIC int op_asm_%s(uint8_t b[MAX_OPLEN], int width, enum ifp ifp)\n", $syntax;
+	printf "STATIC int op_asm_%s(uint8_t b[MAX_OPLEN], uint32_t pc, int width, enum ifp ifp)\n", $syntax;
 	printf "{\n";
 	printf "\tstruct fields\tfields = {};\n";
 	printf "\n";
@@ -430,12 +486,14 @@ sub handle_asm_syntax($) {
 			#
 			# everything else is compiled to:
 			#   parse_chx(..);
+
+# FIXME allow (but ignore) space in actions
 			my $s = $action;
 			while ($s ne '') {
 				if      ($s =~ s/^_//) {
 					printf "\tparse_skipws();\n";
 				} elsif ($s =~ s/^<([a-zA-Z0-9_]+):([a-zA-Z0-9_]+)>//) {
-					printf "\tparse_%s(&fields.%s, width, ifp);\n", $2, $1;
+					printf "\tparse_%s(&fields.%s, pc, width, ifp);\n", $2, $1;
 				} elsif ($s =~ s/^<width>//) {
 					printf "\tparse_width(width);\n";
 				} else {
@@ -588,7 +646,6 @@ sub handle_asm() {
 
 
 
-
 ########
 #
 # dis
@@ -599,15 +656,15 @@ sub handle_dis_syntax($) {
 	printf "/* decode a single operand from a buffer to a string\n";
 	printf "\n";
 	printf "   b[]      9 bytes from the instruction stream\n";
+	printf "   pc       the address of the operand\n";
 	printf "   width    1/2/4/8, depending on the instruction\n";
-	printf "   format   FMT_VAX/FMT_SANE\n";
 	printf "   ifp      int or fp (f/d/g/h)\n";
 	printf "   ---\n";
 	printf "   positive: how many bytes the operand consumed\n";
 	printf "   -1: reserved addressing mode\n";
 	printf "   <-1, 0 and >9 are illegal return values\n";
 	printf " */\n";
-	printf "STATIC struct dis_ret op_dis_%s(uint8_t b[MAX_OPLEN], int width, enum ifp ifp)\n", $syntax;
+	printf "STATIC struct dis_ret op_dis_%s(uint8_t b[MAX_OPLEN], uint32_t pc, int width, enum ifp ifp)\n", $syntax;
 	printf "{\n";
 
 	# loop through the cases for 'sim' section
@@ -736,6 +793,7 @@ done:
 		$action =~ s/^\s+//;
 		$action =~ s/\s+$//;
 
+# FIXME allow (but ignore) space in actions
 		{
 			# pattern language:
 			#
@@ -749,7 +807,7 @@ done:
 					print  $indent, "idx += sprintf(ret.str+idx, \"%d\", width);\n";
 				} elsif ($s =~ s/^<([a-zA-Z0-9_]+):([a-zA-Z0-9_]+)>//) {
 					#          ---------   ---------
-					print  $indent, "idx += sprintf(ret.str+idx, \"%s\", str_$2(fields.$1, width, ifp).str);\n";
+					print  $indent, "idx += sprintf(ret.str+idx, \"%s\", str_$2(fields.$1, pc, width, ifp).str);\n";
 				} else {
 					printf "%sret.str[idx++] = '%s';\n", $indent, substr($s, 0, 1);
 					$s =~ s/^.//;
@@ -1124,13 +1182,14 @@ sub help() {
 	print "./operands.pl <flag>  < input > output\n";
 	print "\n";
 	print "flag:\n";
-	print "    --asm\n";
-	print "    --dis\n";
-	print "    --sim\n";
-	print "    --val\n";
+	print "    --asm     generate code to assemble an operand\n";
+	print "    --dis     generate code to disassemble an operand\n";
+	print "    --sim     generate code to decode an operand\n";
+	print "    --val     generate code to validate an operand\n";
 	print "\n";
-	print "    --dump\n";
-	print "    --check\n";
+	print "    --dump    show how the sections were interpreted\n";
+	print "    --check   check that [asm], [dis], and [sim] sections are in agreement\n";
+	print "    --output  show the [asm] and [dis] sections with cleaned up actions\n";
 	exit;
 }
 
@@ -1149,6 +1208,9 @@ if      ($ARGV[0] eq "--check") {
 
 	read_file();
 	dump_file();
+} elsif ($ARGV[0] eq "--output") {
+	shift @ARGV;
+	output_file();
 } elsif ($ARGV[0] eq "--asm") {
 	shift @ARGV;
 

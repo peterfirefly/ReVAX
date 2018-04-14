@@ -1,4 +1,4 @@
-/* Copyright 2018  Peter Lund <firefly@vax64.dk>\
+/* Copyright 2018  Peter Lund <firefly@vax64.dk>
 
    Licensed under GPL v2.
 

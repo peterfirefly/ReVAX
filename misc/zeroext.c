@@ -1,6 +1,8 @@
 #include <assert.h>
 #include <stdint.h>
 
+#include "macros.h"
+
 #define U_LEN_8        0
 #define U_LEN_16       1
 #define U_LEN_32       2
@@ -26,7 +28,7 @@ int32_t zeroext(int32_t x, int len)
 		break;
 	default:
 		/* U_LEN_64, U_LEN_DATALEN + illegal len values */
-		assert(0);
+		UNREACHABLE();
 	}
 }
 
@@ -50,7 +52,7 @@ int32_t zeroext2(int32_t x, int len)
 		break;
 	default:
 		/* U_LEN_64, U_LEN_DATALEN + illegal len values */
-		assert(0);
+		UNREACHABLE();
 	}
 }
 

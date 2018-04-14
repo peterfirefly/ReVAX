@@ -1,4 +1,4 @@
-/* Copyright 2018  Peter Lund <firefly@vax64.dk>\
+/* Copyright 2018  Peter Lund <firefly@vax64.dk>
 
    Licensed under GPL v2.
 
@@ -13,7 +13,6 @@
 #include "vax-instr.h"
 #include "vax-ucode.h"
 
-#include "shared.h"
 
 
 /* worst-case is octo/h immediate operands: 1 opspec + 16 data bytes */
@@ -131,7 +130,7 @@ struct {
 };
 
 
-int main()
+int main(int argc, char *argv[argc])
 {
 	return EXIT_SUCCESS;
 }

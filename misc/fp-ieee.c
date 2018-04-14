@@ -1,4 +1,4 @@
-/* Copyright 2018  Peter Lund <firefly@vax64.dk>\
+/* Copyright 2018  Peter Lund <firefly@vax64.dk>
 
    Licensed under GPL v2.
 
@@ -42,7 +42,7 @@
 
    gcc -O2 -W -Wall -Isrc misc/fp-ieee.c -lmpfr -lgmp -o fp-ieee
 
-   (mpfr uses gmp internally, fp-ieee.c includes src/shared.h)
+   (mpfr uses gmp internally)
 
  */
 
@@ -55,7 +55,7 @@
 
 #include <mpfr.h>
 
-#include "shared.h"
+#include "strret.h"
 
 
 struct str_ret output_fp(double x)

@@ -1,0 +1,134 @@
+How to make a ReVAX release
+---
+
+I think everything is just committed to HEAD/MASTER all the time.  At least
+in the beginning.
+
+This is a frighteningly long checklist :(
+
+It's probably going to take a few test releases before I get this reasonably
+automated.
+
+
+
+Write/update release notes
+---
+
+
+
+Check that all unit tests pass
+---
+make run-tests
+make afl-run
+
+(repeat on all platforms -- this is what continuous integration is for)
+
+(check that the tests are useful: they should cover all lines)
+
+
+
+Check that the source code is nice
+---
+make fixme -- check manually that it isn't *too* bad
+make spaces
+make reserved
+
+(again, this is what continuous integration is for)
+
+
+
+Check that everything builds
+---
+make distclean	-- careful!  don't do this in my own directory!
+make all
+
+(actually, build asm/dis/sim/uop both with sanitizers and assertions and without
+them, just like 'make tests' and 'make tests-nosan')
+
+
+
+Check remaining targets
+---
+make help
+make cov
+make snips
+make misc
+make vars
+make clean
+
+
+
+Check that things run ok
+---
+./revax-asm ...
+./revax-dis ...
+./revax-sim ...
+
+do the same thing again with sanitizers:
+
+./revax-asm ...
+./revax-dis ...
+./revax-sim ...
+
+(check that the tests cover a reasonable part of asm/dis/sim/uop)
+
+
+
+Check that everything is committed
+---
+hg status
+git status
+
+
+
+Tag the release version
+---
+hg XXXX?
+git XXXX?
+
+
+
+Make a tarball/zipfile
+---
+git archive -o revax-0.1.tar.gz --prefix=revax-0.1/ HEAD	-- or release tag
+git archive -o revax-0.1.zip    --prefix=revax-0.1/ HEAD	-- ------"-------
+hg archive revax-0.1.tar.gz
+
+
+
+Check the tarball/zipfile
+---
+It should not be suspiciously big or small.
+Verify with Midnight Commander that the directory structure in the tarball is correct
+
+verify that it can be uncompressed
+verify that it works:
+  make
+  make help
+  make stats
+  make spaces
+  make fixme
+  make reserved
+
+  make all
+  make snips
+  make misc
+  make tests
+  make tests-nosan
+  make afl-tests
+
+
+
+Packages
+---
+build debian/ubuntu package  -- not for the first few versions
+build Fedora/Red Hat package -- not for the first few versions
+build Raspbian package       -- not for the first few versions
+
+
+
+Upload to github as a released file
+---
+
+
+

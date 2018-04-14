@@ -347,6 +347,19 @@
 
 # pre phase fragments, address calculation
 #
+# ---
+#
+# The -addr-* labels are referenced by the [sim] section of src/operands.spec.
+# src/operands.pl and src/uasm.pl both convert them to C macro names.
+#
+# The name conversion is not pretty:  "-addr-[Rn_______+index(Rx)]" label here
+# is called "M: [Rn    + index(Rx)]" in operands.spec, where "M:" means it's
+# a memory addressing mode and "[Rn    + index(Rx)]" is the label for the
+# microcode that calculates the address (but *doesn't* actually read or write
+# the memory).
+#
+# The label name becomes "LBL_ADDR__RN_______XINDEX_RX__" in the C code.
+#
 -addr-[Rn_______+index(Rx)]:
 	[]	<Rx>, t0	-- <width>
 	add	<Rn>, t0, <pre> -- 32 µ

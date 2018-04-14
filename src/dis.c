@@ -1,4 +1,4 @@
-/* Copyright 2018  Peter Lund <firefly@vax64.dk>\
+/* Copyright 2018  Peter Lund <firefly@vax64.dk>
 
    Licensed under GPL v2.
 
@@ -68,9 +68,20 @@
 
 #include <elf.h>
 
-#include "shared.h"
+#include "strret.h"
+#include "reflow.h"
+#include "string-utils.h"
+#include "html.h"
+
+#include "parse.h"
 
 #include "vax-instr.h"
+
+#define STATIC static
+#include "op-dis-support.h"
+#include "op-dis.h"
+#include "op-val-support.h"
+#include "op-val.h"
 
 
 /***/

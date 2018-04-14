@@ -1,4 +1,4 @@
-/* Copyright 2018  Peter Lund <firefly@vax64.dk>\
+/* Copyright 2018  Peter Lund <firefly@vax64.dk>
 
    Licensed under GPL v2.
 
@@ -10,6 +10,12 @@
 
 #ifndef BIG_INT__H
 #define BIG_INT__H
+
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
+
 
 /* 128-bit value needed for octo/h
    (64-bit needed for quad/d/g)

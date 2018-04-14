@@ -1,4 +1,4 @@
-/* Copyright 2018  Peter Lund <firefly@vax64.dk>\
+/* Copyright 2018  Peter Lund <firefly@vax64.dk>
 
    Licensed under GPL v2.
 
@@ -19,418 +19,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#include "shared.h"
-
-//#include "vax-ucode.h"
-
-#include "big-int.h"
-
-
-/* worst-case is octo/h immediate operands: 1 opspec + 16 data bytes */
-#define MAX_OPLEN	17
-
-enum vax_format { FMT_VAX, FMT_SANE };
-enum ifp	{ IFP_INT, IFP_F, IFP_D, IFP_G, IFP_H };
-
-
-struct fields {
-	int		Rn, Rx;
-	int32_t		addr;
-	int32_t		disp;
-
-	struct big_int	imm;
-	int8_t		lit6;
-};
-
-
-/* operand class
-
-   IMM/REG/ADDR
-
-   anything >= 0 is interpreted as ADDR class (where the actual value is the
-   microcode address).
- */
-#define CLASS_IMM	-2
-#define CLASS_REG	-1
-
-
-/* string buffer types */
-typedef char disstr[100];
-typedef char dis_part_str[50];
-
-
-#include "op-support.h"
-
-struct {
-	int		no;
-	const char	name[5];
-} regs[] = {
-	/* preferred names first */
-	{12, "ap"},
-	{13, "fp"},
-	{14, "sp"},
-	{15, "pc"},
-
-	{ 0, "r0"},
-	{ 1, "r1"},
-	{ 2, "r2"},
-	{ 3, "r3"},
-	{ 4, "r4"},
-	{ 5, "r5"},
-	{ 6, "r6"},
-	{ 7, "r7"},
-	{ 8, "r8"},
-	{ 9, "r9"},
-	{10, "r10"},
-	{11, "r11"},
-	{12, "r12"},
-	{13, "r13"},
-	{14, "r14"},
-	{15, "r15"},
-};
-
-
-
-/* asm */
-static bool parse_reg(int *reg, int width, enum ifp ifp)
-{
-	(void) width, (void) ifp;
-
-	parse_skipws();
-	if (!parse_ok)
-		return false;
-
-	for (unsigned i=0; i < ARRAY_SIZE(regs); i++) {
-		parse_begin();
-		if (parse_symbol(regs[i].name)) {
-			parse_commit();
-			*reg = regs[i].no;
-			return true;
-		} else {
-			parse_rollback();
-		}
-	}
-	return true;
-}
-
-static bool parse_width(int width)
-{
-	/* don't call parse_skipws() -- it's up to the pattern in
-	   operands.spec to decide whether to allow whitespace before
-	   parse_width() or not.
-
-           parse_ch() don't implicitly skip whitespace.
-	 */
-	switch (width) {
-	case  1: return parse_ch('1');
-	case  2: return parse_ch('2');
-	case  4: return parse_ch('4');
-	case  8: return parse_ch('8');
-	case 16: return parse_ch('1') && parse_ch('6');
-	default:
-		assert(0);
-	}
-}
-
-static unsigned fromhex(char ch)
-{
-	if     ((ch >= '0') && (ch <= '9'))
-		return ch-'0';
-	else if ((ch >= 'A') && (ch <= 'F'))
-		return ch - 'A' + 10;
-	else if ((ch >= 'a') && (ch <= 'f'))
-		return ch - 'a' + 10;
-
-	assert(0);
-}
-
-
-static bool parse_bigint(struct big_int *x, int width)
-{
-	/* [+-][0-9][0-9_]*
-	   0x[0-9A-Fa-f][0-9A-Fa-f_]*
-	 */
-
-	struct big_int	tmp = {};
-	bool		neg = false;
-	char		ch;
-
-	parse_skipws();
-
-	/* decimal? */
-	if (!parse_ok)
-		return false;
-
-	parse_begin();
-
-	parse_begin();
-	if (parse_oneof_ch("+-", &ch)) {
-		parse_commit();
-		neg = (ch == '-');
-	} else {
-		parse_rollback();
-	}
-
-	/* hex? */
-	if (!parse_symbol("0x")) {
-		parse_rollback();
-		goto try_dec;
-	}
-	if (!parse_oneof_ch("0123456789ABCDEFabcdef", &ch)) {
-		parse_rollback();
-		return false;
-	}
-
-	tmp = (struct big_int) {.val[0] = fromhex(ch)};
-	while (parse_oneof_ch("0123456789ABCDEFabcdef_", &ch)) {
-		if (ch == '_')
-			continue;
-
-		if ((tmp.val[3] >> 24) != 0) {
-			/* overflow */
-			parse_rollback();
-			return false;
-		}
-
-		tmp = big_add(big_shl(tmp, 4), (struct big_int) {.val[0] = fromhex(ch)}, NULL);
-	}
-
-
-try_dec:
-
-	if (!parse_oneof_ch("0123456789", &ch)) {
-		parse_rollback();
-		goto try_hex;
-	}
-
-
-	/* FIXME: begin/rollback/commit should be around parse_oneof() */
-	tmp = (struct big_int) {.val[0] = ch - '0'};
-	while (parse_oneof_ch("0123456789_", &ch)) {
-		if (ch == '_')
-			continue;
-
-		struct big_int	x10, x10ch;
-		bool		ovf;
-
-		x10 = big_shortmul(tmp, 10, &ovf);
-		if (ovf) {
-			... error
-			parse_rollback()?
-			return false;
-		}
-
-		x10ch = big_add(x10, (struct big_int) {.val[0]= ch - '0'}, &ovf);
-		if (ovf) {
-			... error
-			parse_rollback()?
-			return false;
-		}
-		tmp = x10ch;
-	}
-
-	parse_commit();
-
-	*x = tmp;
-	return true;
-}
-
-
-static bool parse_imm(struct big_int *imm, int width, enum ifp ifp)
-{
-	switch (ifp) {
-	case IFP_INT:
-		{
-		struct big_int	x;
-
-		if (!parse_bigint(&x, width))
-			return false;
-
-		*imm = x;
-		return true;
-		}
-	case IFP_F:	return parse_fp(imm, 'f');
-	case IFP_D:	return parse_fp(imm, 'd');
-	case IFP_G:	return parse_fp(imm, 'g');
-	case IFP_H:	return parse_fp(imm, 'h');
-	default:
-		assert(0);
-	}
-}
-
-
-static bool parse_lit6(int8_t *lit6, int width, enum ifp ifp)
-{
-	struct big_int	x;
-
-	if (!parse_imm(&x, width, ifp))
-		return false;
-
-	/* check that the imm fits in a lit6, convert it if it does */
-	switch (ifp) {
-	case IFP_INT:
-		switch (width) {
-		case  1:
-		case  2:
-		case  4:
-			if ((x.val[0] & ~0x3F) == 0)
-				return false;
-			*lit6 = x.val[0];
-			return true;
-		case  8:
-			if (((x.val[0] & ~0x3F) == 0) || (x.val[1] != 0))
-				return false;
-			*lit6 = x.val[0];
-			return true;
-		case 16:
-			if (((x.val[0] & ~0x3F) == 0) || (x.val[1] != 0) || (x.val[2] != 0) || (x.val[2] != 0))
-				return false;
-			*lit6 = x.val[0];
-			return true;
-		default:
-			assert(0);
-		}
-		break;
-	case IFP_F:
-		if ((x.val[0] & ~0x3F0) != 0x00004000)
-			return false;
-		*lit6 = (x.val[0] >> 4) & 0x3F;
-		return true;
-	case IFP_D:
-		if (((x.val[0] & ~0x3F0) != 0x00004000) || (x.val[1] != 0))
-			return false;
-		*lit6 = (x.val[0] >> 4) & 0x3F;
-		return true;
-	case IFP_G:
-		if (((x.val[0] & ~0x3E0) != 0x00004000)|| (x.val[1] != 0))
-			return false;
-		*lit6 = (x.val[0] >> 1) & 0x3F;
-		return true;
-	case IFP_H:
-		if (((x.val[0] & ~0xE0000007) != 0x00004000) || (x.val[1] != 0) || (x.val[2] != 0) || (x.val[3] != 0))
-			return false;
-		*lit6 = ((x.val[0] >> 3) & 0x7) | ((x.val[0] >> 26) & 0x38);
-		return true;
-	default:
-		assert(0);
-	}
-}
-
-
-static bool parse_disp(int32_t *disp, int width, enum ifp ifp)
-{
-	struct big_int	x;
-	(void) ifp;
-
-	if (!parse_bigint(&x, width))
-		return false;
-
-	*disp = x.val[0];
-	return true;
-}
-
-
-static bool parse_addr(int32_t *addr, int width, enum ifp ifp)
-{
-	(void) width, (void) ifp;
-
-	struct big_int	x;
-
-	if (parse_bigint(&x, 4)) {
-		*addr = x.val[0];
-		return true;
-	}
-	return false;
-}
-
-
-/* dis */
-
-/* immediate -- 1/2/4/8/16 bytes, may be b/w/l/q/o int or f/d/g/h fp */
-static struct str_ret str_imm(struct big_int imm, int width, enum ifp ifp)
-{
-	struct str_ret	buf;
-
-	switch (ifp) {
-	case IFP_INT: if (width == 1) sprintf(buf.str, "0x%02X", imm.val[0] & 0xFF);
-		 else if (width == 2) sprintf(buf.str, "0x%04X", imm.val[0] & 0xFFFF);
-		 else if (width == 4) sprintf(buf.str, "0x%04X_%04X", SPLIT(imm.val[0]));
-		 else if (width == 8) {
-				      sprintf(buf.str, "0x%04X_%04X_%04X_%04X",
-				      		SPLIT(imm.val[1]), SPLIT(imm.val[0]));
-		 }
-		 else if (width ==16) {
-				      sprintf(buf.str, "0x%04X_%04X_%04X_%04X__%04X_%04X_%04X_%04X",
-				      		SPLIT(imm.val[3]), SPLIT(imm.val[2]), SPLIT(imm.val[1]), SPLIT(imm.val[0]));
-		 }
-		 else assert(0);
-		 break;
-	case IFP_F: assert(width== 4); return str_fp(imm, 'f');
-	case IFP_D: assert(width== 8); return str_fp(imm, 'd');
-	case IFP_G: assert(width== 8); return str_fp(imm, 'g');
-	case IFP_H: assert(width==16); return str_fp(imm, 'h');
-	default:
-		assert(0);
-	}
-	return buf;
-}
-
-
-/* register name (r0, r5, pc, ...) */
-static struct str_ret str_reg(int reg, int width, enum ifp ifp)
-{
-	struct str_ret	buf;
-
-	(void) width, (void) ifp;
-
-	assert((reg >= 0) && (reg <= 15));
-
-	/* look for first matching register name */
-	for (unsigned i=0; i < ARRAY_SIZE(regs); i++) {
-		if (reg == regs[i].no) {
-			strcpy(buf.str, regs[i].name);
-			return buf;
-		}
-	}
-
-	/* no match ?! */
-	assert(0);
-}
-
-
-static struct str_ret str_addr(int32_t addr, int width, enum ifp ifp)
-{
-	struct str_ret	buf;
-
-	(void) width, (void) ifp;
-
-	sprintf(buf.str, "0x%04X_%04X", SPLIT(addr));
-	return buf;
-}
-
-
-static struct str_ret str_label(int32_t addr, int width, enum ifp ifp)
-{
-	struct str_ret	buf;
-
-	(void) width, (void) ifp;
-
-	sprintf(buf.str, "0x%04X_%04X", SPLIT(addr));
-	return buf;
-}
-
-
-static struct str_ret str_disp(int32_t disp, int width, enum ifp ifp)
-{
-	struct str_ret	buf;
-
-	(void) width, (void) ifp;
-
-	sprintf(buf.str, "%d", disp);
-	return buf;
-}
-
-
+#include <time.h>
 
 #if 0
 /* declare the functions as static so they can be fully inlined */
@@ -440,92 +29,1867 @@ static struct str_ret str_disp(int32_t disp, int width, enum ifp ifp)
 #  define STATIC
 #endif
 
-#include "op-asm.h"
-#include "op-dis.h"
+
+#include "vax-ucode.h"
+#include "op-sim-support.h"
 #include "op-sim.h"
+
+#include "op-asm-support.h"
+#include "op-asm.h"
+
+#include "op-dis-support.h"
+#include "op-dis.h"
+
+#include "op-val-support.h"
 #include "op-val.h"
+
+
+#include "parse.h"
+#include "big-int.h"
+
+
+/***/
+
+#define NORM	"\x1B[0m"
+#define BOLD	"\x1B[41m"	/* red background */
+#define GREEN	"\x1B[42;30m"	/* green background, black foreground */
+
+/***/
+
+#define C(x)	if (!(x)) { fprintf(stderr, "Error [%-4d]: %s\n", __LINE__, #x); exit(1); }
+#define T(x)	fprintf(stderr, "%s:\n", x);
+
+void test_parse_int()
+{
+	struct big_int	x;
+
+/* FIXME test parse_ok afterwards! */
+
+	T("1 - 0a");
+	  parse_init("");
+	C(!parse_bigint(&x, 1));
+	  parse_done();
+
+	T("1 - 0b");
+	  parse_init("-");
+	C(!parse_bigint(&x, 1));
+	  parse_done();
+
+	T("1 - 0c");
+	  parse_init("+");
+	C(!parse_bigint(&x, 1));
+	  parse_done();
+
+	T("1 - 0d");
+	  parse_init(",");
+	C(!parse_bigint(&x, 1));
+	  parse_done();
+
+	T("1 - 1");
+	  parse_init("0");
+	C(parse_bigint(&x, 1));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0);
+
+	T("1 - 2");
+	  parse_init("9");
+	C(parse_bigint(&x, 1))
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 9);
+
+	T("1 - 3");
+	  parse_init("0 ");
+	C(parse_bigint(&x, 1));
+	C(parse_ch(' '));
+	  parse_done();
+	C(x.val[0] == 0);
+
+	T("1 - 4");
+	  parse_init("9 ");
+	C(parse_bigint(&x, 1));
+	C(parse_ch(' '));
+	  parse_done();
+	C(x.val[0] == 9);
+
+	T("1 - 5");
+	  parse_init("9,");
+	C(parse_bigint(&x, 1));
+	C(parse_ch(','));
+	  parse_done();
+	C(x.val[0] == 9);
+
+	T("1 - 6");
+	  parse_init("9.");
+	C(parse_bigint(&x, 1));
+	C(parse_ch('.'));
+	  parse_done();
+	C(x.val[0] == 9);
+
+	T("1 - 7");
+	  parse_init("19");
+	C(parse_bigint(&x, 1));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 19);
+
+	T("1 - 8");
+	  parse_init("255");
+	C(parse_bigint(&x, 1));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 255);
+
+	T("1 - 9");
+	  parse_init("256");
+	C(!parse_bigint(&x, 1));
+	  parse_done();
+
+	T("1 - 10");
+	  parse_init("-127");
+	C(parse_bigint(&x, 1));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0xFFFFFF81);
+
+	T("1 - 11");
+	  parse_init("-128");
+	C(parse_bigint(&x, 1));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0xFFFFFF80);
+
+	T("1 - 12");
+	  parse_init("0x12");
+	C(parse_bigint(&x, 1));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0x12);
+
+	T("1 - 13");
+	  parse_init("0x99");
+	C(parse_bigint(&x, 1));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0x99);
+
+	T("1 - 14");
+	  parse_init("0xFF");
+	C(parse_bigint(&x, 1));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0xFF);
+
+	T("1 - 15");
+	  parse_init("^X0");
+	C(parse_bigint(&x, 1));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0);
+
+	T("1 - 16");
+	  parse_init("^X12");
+	C(parse_bigint(&x, 1));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0x12);
+
+	T("1 - 17");
+	  parse_init("^XFF");
+	C(parse_bigint(&x, 1));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0xFF);
+
+	T("1 - 18");
+	  parse_init("-^x80");
+	C(!parse_bigint(&x, 1));
+	  parse_done();
+
+	T("1 - 18b");
+	  parse_init("-^X80");
+	C(parse_bigint(&x, 1));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0xFFFFFF80);
+
+	T("1 - 19");
+	  parse_init("-0x12");
+	C(parse_bigint(&x, 1));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0xFFFFFFEE);
+
+	T("1 - 20");
+	  parse_init("0x100");
+	C(!parse_bigint(&x, 1));
+	  parse_done();
+
+	T("1 - 21");
+	  parse_init("-0x81");
+	C(parse_bigint(&x, 1));	/* I actually want this to fail -- I think */
+	  parse_done();
+	C(x.val[0] == 0xFFFFFF7F);
+
+	T("1 - 22");
+	  parse_init("0x123456");
+	C(!parse_bigint(&x, 1));
+	  parse_done();
+
+	T("1 - 23");
+	  parse_init("0x123456789ABCDEF0");
+	C(!parse_bigint(&x, 1));
+	  parse_done();
+
+	/***/
+
+	T("2 - 1");
+	  parse_init("0");
+	C(parse_bigint(&x, 2));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0);
+
+	T("2 - 2");
+	  parse_init("9");
+	C(parse_bigint(&x, 2));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 9);
+
+	T("2 - 3");
+	  parse_init("9999");
+	C(parse_bigint(&x, 2));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 9999);
+
+	T("2 - 4");
+	  parse_init("99999");
+	C(!parse_bigint(&x, 2));
+	  parse_done();
+
+	T("2 - 5");
+	  parse_init("65535");
+	C(parse_bigint(&x, 2));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 65535);
+
+	T("2 - 6");
+	  parse_init("65536");
+	C(!parse_bigint(&x, 2));
+	  parse_done();
+
+	T("2 - 7");
+	  parse_init("-32768");
+	C(parse_bigint(&x, 2));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0xFFFF8000);
+
+	T("2 - 8");
+	  parse_init("-32769");
+	C(parse_bigint(&x, 2));		/* I think I want this to fail */
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0xFFFF7FFF);
+
+	T("2 - 9");
+	  parse_init("0xFFFF");
+	C(parse_bigint(&x, 2));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0xFFFF);
+
+	T("2 - 10");
+	  parse_init("0x10000");
+	C(!parse_bigint(&x, 2));
+	  parse_done();
+
+	T("2 - 11");
+	  parse_init("^XFFFF");
+	C(parse_bigint(&x, 2));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0xFFFF);
+
+	T("2 - 12");
+	  parse_init("^X10000");
+	C(!parse_bigint(&x, 2));
+	  parse_done();
+
+	/***/
+
+	T("4 - 1");
+	  parse_init("0");
+	C(parse_bigint(&x, 4));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0);
+
+	T("4 - 2");
+	  parse_init("4000111222");
+	C(parse_bigint(&x, 4));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 4000111222);
+	C(x.val[1] == 0);
+	C(x.val[2] == 0);
+	C(x.val[3] == 0);
+
+	T("4 - 3");
+	  parse_init("0xFFFFFFFF");
+	C(parse_bigint(&x, 4));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0xFFFFFFFF);
+	C(x.val[1] == 0);
+	C(x.val[2] == 0);
+	C(x.val[3] == 0);
+
+	T("4 - 4");
+	  parse_init("0x1FFFFFFFF");
+	C(!parse_bigint(&x, 4));
+	  parse_done();
+
+	T("4 - 5");
+	  parse_init("-0x7FFFFFFF");
+	C(parse_bigint(&x, 4));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0x80000001);
+	C(x.val[1] == 0xFFFFFFFF);
+	C(x.val[2] == 0xFFFFFFFF);
+	C(x.val[3] == 0xFFFFFFFF);
+
+	/***/
+
+	T("8 - 1");
+	  parse_init("0");
+	C(parse_bigint(&x, 8));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0);
+	C(x.val[1] == 0);
+	C(x.val[2] == 0);
+	C(x.val[3] == 0);
+
+	T("8 - 2");
+	  parse_init("0xFFFF_FFFF_FFFF_FFFF");
+	C(parse_bigint(&x, 8));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0xFFFFFFFF);
+	C(x.val[1] == 0xFFFFFFFF);
+	C(x.val[2] == 0);
+	C(x.val[3] == 0);
+
+	T("8 - 3");
+	  parse_init("0x1_FFFF_FFFF_FFFF_FFFF");
+	C(!parse_bigint(&x, 8));
+	  parse_done();
+
+	T("8 - 4");
+	  parse_init("-0x7FFF_FFFF_FFFF_FFFF");
+	C(parse_bigint(&x, 8));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0x00000001);
+	C(x.val[1] == 0x80000000);
+	C(x.val[2] == 0xFFFFFFFF);
+	C(x.val[3] == 0xFFFFFFFF);
+
+	/***/
+
+	T("16 - 1");
+	  parse_init("0000");
+	C(parse_bigint(&x, 16));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0);
+	C(x.val[1] == 0);
+	C(x.val[2] == 0);
+	C(x.val[3] == 0);
+
+	T("16 - 2");
+	  parse_init("999");
+	C(parse_bigint(&x, 16));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 999);
+	C(x.val[1] == 0);
+	C(x.val[2] == 0);
+	C(x.val[3] == 0);
+
+
+	T("16 - 3");
+	  parse_init("0xFFFF_FFFF_FFFF_FFFF__FFFF_FFFF_FFFF_FFFF");
+	C(parse_bigint(&x, 16));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0xFFFFFFFF);
+	C(x.val[1] == 0xFFFFFFFF);
+	C(x.val[2] == 0xFFFFFFFF);
+	C(x.val[3] == 0xFFFFFFFF);
+
+	T("16 - 4");
+	  parse_init("0x1234_5678_9ABC_DEF0__4321_8765_CBA9_0FED");
+	C(parse_bigint(&x, 16));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0xCBA90FED);
+	C(x.val[1] == 0x43218765);
+	C(x.val[2] == 0x9ABCDEF0);
+	C(x.val[3] == 0x12345678);
+
+	T("16 - 5");
+	  parse_init("0x1_FFFF_FFFF_FFFF_FFFF__FFFF_FFFF_FFFF_FFFF");
+	C(!parse_bigint(&x, 16));
+	  parse_done();
+
+	T("16 - 6");
+	  parse_init("-1");
+	C(parse_bigint(&x, 16));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0xFFFFFFFF);
+	C(x.val[1] == 0xFFFFFFFF);
+	C(x.val[2] == 0xFFFFFFFF);
+	C(x.val[3] == 0xFFFFFFFF);
+
+	T("16 - 7");
+	  parse_init("-0xFFFF_FFFF_FFFF_FFFF__FFFF_FFFF_FFFF_FFFF");
+	C(parse_bigint(&x, 16));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 1);
+	C(x.val[1] == 0);
+	C(x.val[2] == 0);
+	C(x.val[3] == 0);
+
+	T("16 - 8");
+	  parse_init("-0x7FFF_FFFF_FFFF_FFFF__FFFF_FFFF_FFFF_FFFF");
+	C(parse_bigint(&x, 16));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0x00000001);
+	C(x.val[1] == 0x00000000);
+	C(x.val[2] == 0x00000000);
+	C(x.val[3] == 0x80000000);
+
+	T("16 - 9");
+	  parse_init("-0x8000_0000_0000_0000__0000_0000_0000_0000");
+	C(parse_bigint(&x, 16));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0x00000000);
+	C(x.val[1] == 0x00000000);
+	C(x.val[2] == 0x00000000);
+	C(x.val[3] == 0x80000000);
+}
+
+
+
+/* VAX fp values are 0.0 if exp=0, s=0 (so -0.0 doesn't exist on the VAX).
+   They are called clean zeros if frac=0, otherwise they are called dirty zeros.
+ */
+void test_parse_fp()
+{
+	struct big_int	x;
+
+/* FIXME test parse_ok afterwards! */
+
+	T("f -- 0");
+	  parse_init("...");
+	C(!parse_fp(&x, 'f'));
+	  parse_done();
+
+	T("f -- 1");
+	  parse_init("");
+	C(!parse_fp(&x, 'f'));
+	  parse_done();
+
+	T("f -- 2");
+	  parse_init("0");
+	C(parse_fp(&x, 'f'))
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0);
+	C(x.val[1] == 0);
+	C(x.val[2] == 0);
+	C(x.val[3] == 0);
+
+	T("f -- 3");
+	  parse_init("1");
+	C(parse_fp(&x, 'f'));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0x00004080);
+	C(x.val[1] == 0);
+	C(x.val[2] == 0);
+	C(x.val[3] == 0);
+
+	T("f -- 4");
+	  parse_init("1.");
+	C(parse_fp(&x, 'f'));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0x00004080);
+	C(x.val[1] == 0);
+	C(x.val[2] == 0);
+	C(x.val[3] == 0);
+
+	T("f -- 5");
+	  parse_init("1.0");
+	C(parse_fp(&x, 'f'));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0x00004080);
+	C(x.val[1] == 0);
+	C(x.val[2] == 0);
+	C(x.val[3] == 0);
+
+	T("f -- 6");
+	  parse_init("1.00");
+	C(parse_fp(&x, 'f'));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0x00004080);
+	C(x.val[1] == 0);
+	C(x.val[2] == 0);
+	C(x.val[3] == 0);
+
+	T("f -- 7");
+	  parse_init("001");
+	C(parse_fp(&x, 'f'));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0x00004080);
+	C(x.val[1] == 0);
+	C(x.val[2] == 0);
+	C(x.val[3] == 0);
+
+	T("f -- 8");
+	  parse_init("1.1");
+	C(parse_fp(&x, 'f'));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0xCCCD408C);
+	C(x.val[1] == 0);
+	C(x.val[2] == 0);
+	C(x.val[3] == 0);
+
+	T("f -- 9");
+	  parse_init("1.1415");
+	C(parse_fp(&x, 'f'));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0x1CAC4092);
+	C(x.val[1] == 0);
+	C(x.val[2] == 0);
+	C(x.val[3] == 0);
+
+	T("f -- 10");
+	  parse_init("123.1");
+	C(parse_fp(&x, 'f'));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0x333343F6);
+	C(x.val[1] == 0);
+	C(x.val[2] == 0);
+	C(x.val[3] == 0);
+
+	T("f -- 11");
+	  parse_init("123.1,");
+	C(parse_fp(&x, 'f'));
+	C(parse_ch(','));
+	  parse_done();
+	C(x.val[0] == 0x333343F6);
+	C(x.val[1] == 0);
+	C(x.val[2] == 0);
+	C(x.val[3] == 0);
+
+	T("f -- 12");
+	  parse_init("123.1 ");
+	C(parse_fp(&x, 'f'));
+	C(parse_ch(' '));
+	  parse_done();
+	C(x.val[0] == 0x333343F6);
+	C(x.val[1] == 0);
+	C(x.val[2] == 0);
+	C(x.val[3] == 0);
+
+	T("f -- 13");
+	  parse_init("123.1.");
+	C(parse_fp(&x, 'f'));
+	C(parse_ch('.'));
+	  parse_done();
+	C(x.val[0] == 0x333343F6);
+	C(x.val[1] == 0);
+	C(x.val[2] == 0);
+	C(x.val[3] == 0);
+
+	T("f -- 14");
+	  parse_init("-123.1");
+	C(parse_fp(&x, 'f'));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0x3333C3F6);
+	C(x.val[1] == 0);
+	C(x.val[2] == 0);
+	C(x.val[3] == 0);
+
+	T("f -- 15");
+	  parse_init("123.1E3");
+	C(parse_fp(&x, 'f'));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0x6E0048F0);
+	C(x.val[1] == 0);
+	C(x.val[2] == 0);
+	C(x.val[3] == 0);
+
+	T("f -- 16");
+	  parse_init("123.1E-3");
+	C(parse_fp(&x, 'f'));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0x1BDA3EFC);
+	C(x.val[1] == 0);
+	C(x.val[2] == 0);
+	C(x.val[3] == 0);
+
+	T("f -- 17");
+	  parse_init("123.1E12");
+	C(parse_fp(&x, 'f'));
+	C(parse_eof());
+	  parse_done();
+	C(x.val[0] == 0xEAE857DF);
+	C(x.val[1] == 0);
+	C(x.val[2] == 0);
+	C(x.val[3] == 0);
+
+	T("f -- 18");
+	  parse_init("123.1E-12,");
+	C(parse_fp(&x, 'f'));
+	C(parse_ch(','));
+	  parse_done();
+	C(x.val[0] == 0x59923007);
+	C(x.val[1] == 0);
+	C(x.val[2] == 0);
+	C(x.val[3] == 0);
+
+	/***/
+
+	T("d - 1");
+	  parse_init("123.1E-12,");
+	C(parse_fp(&x, 'd'));
+	C(parse_ch(','));
+	  parse_done();
+	C(x.val[0] == 0x59913007);
+	C(x.val[1] == 0x40DAD379);
+	C(x.val[2] == 0);
+	C(x.val[3] == 0);
+
+	/***/
+
+	T("g - 1");
+	  parse_init("123.1E-12,");
+	C(parse_fp(&x, 'g'));
+	C(parse_ch(','));
+	  parse_done();
+	C(x.val[0] == 0xEB323E00);
+	C(x.val[1] == 0x281B3A6F);
+	C(x.val[2] == 0);
+	C(x.val[3] == 0);
+
+	/***/
+
+	T("h - 1");
+	  parse_init("123.1E-123,");
+	C(parse_fp(&x, 'h'));
+	C(parse_ch(','));
+	  parse_done();
+	C(x.val[0] == 0x45813E6F);
+	C(x.val[1] == 0x8A540375);
+	C(x.val[2] == 0x5C0AD539);
+	C(x.val[3] == 0xDE8F79D7);
+
+}
+
+
+void test_parse()
+{
+	test_parse_int();
+	test_parse_fp();
+}
 
 
 /***/
 
 
-struct testcase {
+
+struct test_asm_case {
+	const char	*str;
+	int		 cnt;
+	uint8_t		 b[MAX_OPLEN];
+	uint32_t	 pc;
+	int		 width;
+	enum ifp	 ifp;
+};
+
+struct test_asm_case asm_vax[] = {
+	{.str="S^#0",		.cnt=1, .b={0x00}, .width=1, .ifp=IFP_INT},
+	{.str="S^#63",		.cnt=1, .b={0x3F}, .width=1, .ifp=IFP_INT},
+	{.str="S^#64",		.cnt=-1,           .width=1, .ifp=IFP_INT},
+
+	/* 000.000 */
+	{.str="S^#0.5",		.cnt=1, .b={0x00}, .width= 4, .ifp=IFP_F},
+	{.str="S^#0.5",		.cnt=1, .b={0x00}, .width= 8, .ifp=IFP_D},
+	{.str="S^#0.5",		.cnt=1, .b={0x00}, .width= 8, .ifp=IFP_G},
+	{.str="S^#0.5",		.cnt=1, .b={0x00}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#0.5625",	.cnt=1, .b={0x01}, .width= 4, .ifp=IFP_F},
+	{.str="S^#0.5625",	.cnt=1, .b={0x01}, .width= 8, .ifp=IFP_D},
+	{.str="S^#0.5625",	.cnt=1, .b={0x01}, .width= 8, .ifp=IFP_G},
+	{.str="S^#0.5625",	.cnt=1, .b={0x01}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#0.625",	.cnt=1, .b={0x02}, .width= 4, .ifp=IFP_F},
+	{.str="S^#0.625",	.cnt=1, .b={0x02}, .width= 8, .ifp=IFP_D},
+	{.str="S^#0.625",	.cnt=1, .b={0x02}, .width= 8, .ifp=IFP_G},
+	{.str="S^#0.625",	.cnt=1, .b={0x02}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#0.6875",	.cnt=1, .b={0x03}, .width= 4, .ifp=IFP_F},
+	{.str="S^#0.6875",	.cnt=1, .b={0x03}, .width= 8, .ifp=IFP_D},
+	{.str="S^#0.6875",	.cnt=1, .b={0x03}, .width= 8, .ifp=IFP_G},
+	{.str="S^#0.6875",	.cnt=1, .b={0x03}, .width=16, .ifp=IFP_H},
+
+	/* 000.100 */
+	{.str="S^#0.75",	.cnt=1, .b={0x04}, .width= 4, .ifp=IFP_F},
+	{.str="S^#0.75",	.cnt=1, .b={0x04}, .width= 8, .ifp=IFP_D},
+	{.str="S^#0.75",	.cnt=1, .b={0x04}, .width= 8, .ifp=IFP_G},
+	{.str="S^#0.75",	.cnt=1, .b={0x04}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#0.8125",	.cnt=1, .b={0x05}, .width= 4, .ifp=IFP_F},
+	{.str="S^#0.8125",	.cnt=1, .b={0x05}, .width= 8, .ifp=IFP_D},
+	{.str="S^#0.8125",	.cnt=1, .b={0x05}, .width= 8, .ifp=IFP_G},
+	{.str="S^#0.8125",	.cnt=1, .b={0x05}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#0.875",	.cnt=1, .b={0x06}, .width= 4, .ifp=IFP_F},
+	{.str="S^#0.875",	.cnt=1, .b={0x06}, .width= 8, .ifp=IFP_D},
+	{.str="S^#0.875",	.cnt=1, .b={0x06}, .width= 8, .ifp=IFP_G},
+	{.str="S^#0.875",	.cnt=1, .b={0x06}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#0.9375",	.cnt=1, .b={0x07}, .width= 4, .ifp=IFP_F},
+	{.str="S^#0.9375",	.cnt=1, .b={0x07}, .width= 8, .ifp=IFP_D},
+	{.str="S^#0.9375",	.cnt=1, .b={0x07}, .width= 8, .ifp=IFP_G},
+	{.str="S^#0.9375",	.cnt=1, .b={0x07}, .width=16, .ifp=IFP_H},
+
+	/* 001.000 */
+	{.str="S^#1",		.cnt=1, .b={0x08}, .width= 4, .ifp=IFP_F},
+	{.str="S^#1",		.cnt=1, .b={0x08}, .width= 8, .ifp=IFP_D},
+	{.str="S^#1",		.cnt=1, .b={0x08}, .width= 8, .ifp=IFP_G},
+	{.str="S^#1",		.cnt=1, .b={0x08}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#1.125",	.cnt=1, .b={0x09}, .width= 4, .ifp=IFP_F},
+	{.str="S^#1.125",	.cnt=1, .b={0x09}, .width= 8, .ifp=IFP_D},
+	{.str="S^#1.125",	.cnt=1, .b={0x09}, .width= 8, .ifp=IFP_G},
+	{.str="S^#1.125",	.cnt=1, .b={0x09}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#1.25",	.cnt=1, .b={0x0A}, .width= 4, .ifp=IFP_F},
+	{.str="S^#1.25",	.cnt=1, .b={0x0A}, .width= 8, .ifp=IFP_D},
+	{.str="S^#1.25",	.cnt=1, .b={0x0A}, .width= 8, .ifp=IFP_G},
+	{.str="S^#1.25",	.cnt=1, .b={0x0A}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#1.375",	.cnt=1, .b={0x0B}, .width= 4, .ifp=IFP_F},
+	{.str="S^#1.375",	.cnt=1, .b={0x0B}, .width= 8, .ifp=IFP_D},
+	{.str="S^#1.375",	.cnt=1, .b={0x0B}, .width= 8, .ifp=IFP_G},
+	{.str="S^#1.375",	.cnt=1, .b={0x0B}, .width=16, .ifp=IFP_H},
+
+	/* 001.100 */
+	{.str="S^#1.5",		.cnt=1, .b={0x0C}, .width= 4, .ifp=IFP_F},
+	{.str="S^#1.5",		.cnt=1, .b={0x0C}, .width= 8, .ifp=IFP_D},
+	{.str="S^#1.5",		.cnt=1, .b={0x0C}, .width= 8, .ifp=IFP_G},
+	{.str="S^#1.5",		.cnt=1, .b={0x0C}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#1.625",	.cnt=1, .b={0x0D}, .width= 4, .ifp=IFP_F},
+	{.str="S^#1.625",	.cnt=1, .b={0x0D}, .width= 8, .ifp=IFP_D},
+	{.str="S^#1.625",	.cnt=1, .b={0x0D}, .width= 8, .ifp=IFP_G},
+	{.str="S^#1.625",	.cnt=1, .b={0x0D}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#1.75",	.cnt=1, .b={0x0E}, .width= 4, .ifp=IFP_F},
+	{.str="S^#1.75",	.cnt=1, .b={0x0E}, .width= 8, .ifp=IFP_D},
+	{.str="S^#1.75",	.cnt=1, .b={0x0E}, .width= 8, .ifp=IFP_G},
+	{.str="S^#1.75",	.cnt=1, .b={0x0E}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#1.875",	.cnt=1, .b={0x0F}, .width= 4, .ifp=IFP_F},
+	{.str="S^#1.875",	.cnt=1, .b={0x0F}, .width= 8, .ifp=IFP_D},
+	{.str="S^#1.875",	.cnt=1, .b={0x0F}, .width= 8, .ifp=IFP_G},
+	{.str="S^#1.875",	.cnt=1, .b={0x0F}, .width=16, .ifp=IFP_H},
+
+	/* 010.000 */
+	{.str="S^#2",		.cnt=1, .b={0x10}, .width= 4, .ifp=IFP_F},
+	{.str="S^#2",		.cnt=1, .b={0x10}, .width= 8, .ifp=IFP_D},
+	{.str="S^#2",		.cnt=1, .b={0x10}, .width= 8, .ifp=IFP_G},
+	{.str="S^#2",		.cnt=1, .b={0x10}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#2.25",	.cnt=1, .b={0x11}, .width= 4, .ifp=IFP_F},
+	{.str="S^#2.25",	.cnt=1, .b={0x11}, .width= 8, .ifp=IFP_D},
+	{.str="S^#2.25",	.cnt=1, .b={0x11}, .width= 8, .ifp=IFP_G},
+	{.str="S^#2.25",	.cnt=1, .b={0x11}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#2.5",		.cnt=1, .b={0x12}, .width= 4, .ifp=IFP_F},
+	{.str="S^#2.5",		.cnt=1, .b={0x12}, .width= 8, .ifp=IFP_D},
+	{.str="S^#2.5",		.cnt=1, .b={0x12}, .width= 8, .ifp=IFP_G},
+	{.str="S^#2.5",		.cnt=1, .b={0x12}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#2.75",	.cnt=1, .b={0x13}, .width= 4, .ifp=IFP_F},
+	{.str="S^#2.75",	.cnt=1, .b={0x13}, .width= 8, .ifp=IFP_D},
+	{.str="S^#2.75",	.cnt=1, .b={0x13}, .width= 8, .ifp=IFP_G},
+	{.str="S^#2.75",	.cnt=1, .b={0x13}, .width=16, .ifp=IFP_H},
+
+	/* 010.100 */
+	{.str="S^#3",		.cnt=1, .b={0x14}, .width= 4, .ifp=IFP_F},
+	{.str="S^#3",		.cnt=1, .b={0x14}, .width= 8, .ifp=IFP_D},
+	{.str="S^#3",		.cnt=1, .b={0x14}, .width= 8, .ifp=IFP_G},
+	{.str="S^#3",		.cnt=1, .b={0x14}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#3.25",	.cnt=1, .b={0x15}, .width= 4, .ifp=IFP_F},
+	{.str="S^#3.25",	.cnt=1, .b={0x15}, .width= 8, .ifp=IFP_D},
+	{.str="S^#3.25",	.cnt=1, .b={0x15}, .width= 8, .ifp=IFP_G},
+	{.str="S^#3.25",	.cnt=1, .b={0x15}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#3.5",		.cnt=1, .b={0x16}, .width= 4, .ifp=IFP_F},
+	{.str="S^#3.5",		.cnt=1, .b={0x16}, .width= 8, .ifp=IFP_D},
+	{.str="S^#3.5",		.cnt=1, .b={0x16}, .width= 8, .ifp=IFP_G},
+	{.str="S^#3.5",		.cnt=1, .b={0x16}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#3.75",	.cnt=1, .b={0x17}, .width= 4, .ifp=IFP_F},
+	{.str="S^#3.75",	.cnt=1, .b={0x17}, .width= 8, .ifp=IFP_D},
+	{.str="S^#3.75",	.cnt=1, .b={0x17}, .width= 8, .ifp=IFP_G},
+	{.str="S^#3.75",	.cnt=1, .b={0x17}, .width=16, .ifp=IFP_H},
+
+	/* 011.000 */
+	{.str="S^#4",		.cnt=1, .b={0x18}, .width= 4, .ifp=IFP_F},
+	{.str="S^#4",		.cnt=1, .b={0x18}, .width= 8, .ifp=IFP_D},
+	{.str="S^#4",		.cnt=1, .b={0x18}, .width= 8, .ifp=IFP_G},
+	{.str="S^#4",		.cnt=1, .b={0x18}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#4.5",		.cnt=1, .b={0x19}, .width= 4, .ifp=IFP_F},
+	{.str="S^#4.5",		.cnt=1, .b={0x19}, .width= 8, .ifp=IFP_D},
+	{.str="S^#4.5",		.cnt=1, .b={0x19}, .width= 8, .ifp=IFP_G},
+	{.str="S^#4.5",		.cnt=1, .b={0x19}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#5",		.cnt=1, .b={0x1A}, .width= 4, .ifp=IFP_F},
+	{.str="S^#5",		.cnt=1, .b={0x1A}, .width= 8, .ifp=IFP_D},
+	{.str="S^#5",		.cnt=1, .b={0x1A}, .width= 8, .ifp=IFP_G},
+	{.str="S^#5",		.cnt=1, .b={0x1A}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#5.5",		.cnt=1, .b={0x1B}, .width= 4, .ifp=IFP_F},
+	{.str="S^#5.5",		.cnt=1, .b={0x1B}, .width= 8, .ifp=IFP_D},
+	{.str="S^#5.5",		.cnt=1, .b={0x1B}, .width= 8, .ifp=IFP_G},
+	{.str="S^#5.5",		.cnt=1, .b={0x1B}, .width=16, .ifp=IFP_H},
+
+	/* 011.100 */
+	{.str="S^#6",		.cnt=1, .b={0x1C}, .width= 4, .ifp=IFP_F},
+	{.str="S^#6",		.cnt=1, .b={0x1C}, .width= 8, .ifp=IFP_D},
+	{.str="S^#6",		.cnt=1, .b={0x1C}, .width= 8, .ifp=IFP_G},
+	{.str="S^#6",		.cnt=1, .b={0x1C}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#6.5",		.cnt=1, .b={0x1D}, .width= 4, .ifp=IFP_F},
+	{.str="S^#6.5",		.cnt=1, .b={0x1D}, .width= 8, .ifp=IFP_D},
+	{.str="S^#6.5",		.cnt=1, .b={0x1D}, .width= 8, .ifp=IFP_G},
+	{.str="S^#6.5",		.cnt=1, .b={0x1D}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#7",		.cnt=1, .b={0x1E}, .width= 4, .ifp=IFP_F},
+	{.str="S^#7",		.cnt=1, .b={0x1E}, .width= 8, .ifp=IFP_D},
+	{.str="S^#7",		.cnt=1, .b={0x1E}, .width= 8, .ifp=IFP_G},
+	{.str="S^#7",		.cnt=1, .b={0x1E}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#7.5",		.cnt=1, .b={0x1F}, .width= 4, .ifp=IFP_F},
+	{.str="S^#7.5",		.cnt=1, .b={0x1F}, .width= 8, .ifp=IFP_D},
+	{.str="S^#7.5",		.cnt=1, .b={0x1F}, .width= 8, .ifp=IFP_G},
+	{.str="S^#7.5",		.cnt=1, .b={0x1F}, .width=16, .ifp=IFP_H},
+
+	/* 100.000 */
+	{.str="S^#8",		.cnt=1, .b={0x20}, .width= 4, .ifp=IFP_F},
+	{.str="S^#8",		.cnt=1, .b={0x20}, .width= 8, .ifp=IFP_D},
+	{.str="S^#8",		.cnt=1, .b={0x20}, .width= 8, .ifp=IFP_G},
+	{.str="S^#8",		.cnt=1, .b={0x20}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#9",		.cnt=1, .b={0x21}, .width= 4, .ifp=IFP_F},
+	{.str="S^#9",		.cnt=1, .b={0x21}, .width= 8, .ifp=IFP_D},
+	{.str="S^#9",		.cnt=1, .b={0x21}, .width= 8, .ifp=IFP_G},
+	{.str="S^#9",		.cnt=1, .b={0x21}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#10",		.cnt=1, .b={0x22}, .width= 4, .ifp=IFP_F},
+	{.str="S^#10",		.cnt=1, .b={0x22}, .width= 8, .ifp=IFP_D},
+	{.str="S^#10",		.cnt=1, .b={0x22}, .width= 8, .ifp=IFP_G},
+	{.str="S^#10",		.cnt=1, .b={0x22}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#11",		.cnt=1, .b={0x23}, .width= 4, .ifp=IFP_F},
+	{.str="S^#11",		.cnt=1, .b={0x23}, .width= 8, .ifp=IFP_D},
+	{.str="S^#11",		.cnt=1, .b={0x23}, .width= 8, .ifp=IFP_G},
+	{.str="S^#11",		.cnt=1, .b={0x23}, .width=16, .ifp=IFP_H},
+
+	/* 100.100 */
+	{.str="S^#12",		.cnt=1, .b={0x24}, .width= 4, .ifp=IFP_F},
+	{.str="S^#12",		.cnt=1, .b={0x24}, .width= 8, .ifp=IFP_D},
+	{.str="S^#12",		.cnt=1, .b={0x24}, .width= 8, .ifp=IFP_G},
+	{.str="S^#12",		.cnt=1, .b={0x24}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#13",		.cnt=1, .b={0x25}, .width= 4, .ifp=IFP_F},
+	{.str="S^#13",		.cnt=1, .b={0x25}, .width= 8, .ifp=IFP_D},
+	{.str="S^#13",		.cnt=1, .b={0x25}, .width= 8, .ifp=IFP_G},
+	{.str="S^#13",		.cnt=1, .b={0x25}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#14",		.cnt=1, .b={0x26}, .width= 4, .ifp=IFP_F},
+	{.str="S^#14",		.cnt=1, .b={0x26}, .width= 8, .ifp=IFP_D},
+	{.str="S^#14",		.cnt=1, .b={0x26}, .width= 8, .ifp=IFP_G},
+	{.str="S^#14",		.cnt=1, .b={0x26}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#15",		.cnt=1, .b={0x27}, .width= 4, .ifp=IFP_F},
+	{.str="S^#15",		.cnt=1, .b={0x27}, .width= 8, .ifp=IFP_D},
+	{.str="S^#15",		.cnt=1, .b={0x27}, .width= 8, .ifp=IFP_G},
+	{.str="S^#15",		.cnt=1, .b={0x27}, .width=16, .ifp=IFP_H},
+
+	/* 101.000 */
+	{.str="S^#16",		.cnt=1, .b={0x28}, .width= 4, .ifp=IFP_F},
+	{.str="S^#16",		.cnt=1, .b={0x28}, .width= 8, .ifp=IFP_D},
+	{.str="S^#16",		.cnt=1, .b={0x28}, .width= 8, .ifp=IFP_G},
+	{.str="S^#16",		.cnt=1, .b={0x28}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#18",		.cnt=1, .b={0x29}, .width= 4, .ifp=IFP_F},
+	{.str="S^#18",		.cnt=1, .b={0x29}, .width= 8, .ifp=IFP_D},
+	{.str="S^#18",		.cnt=1, .b={0x29}, .width= 8, .ifp=IFP_G},
+	{.str="S^#18",		.cnt=1, .b={0x29}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#20",		.cnt=1, .b={0x2A}, .width= 4, .ifp=IFP_F},
+	{.str="S^#20",		.cnt=1, .b={0x2A}, .width= 8, .ifp=IFP_D},
+	{.str="S^#20",		.cnt=1, .b={0x2A}, .width= 8, .ifp=IFP_G},
+	{.str="S^#20",		.cnt=1, .b={0x2A}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#22",		.cnt=1, .b={0x2B}, .width= 4, .ifp=IFP_F},
+	{.str="S^#22",		.cnt=1, .b={0x2B}, .width= 8, .ifp=IFP_D},
+	{.str="S^#22",		.cnt=1, .b={0x2B}, .width= 8, .ifp=IFP_G},
+	{.str="S^#22",		.cnt=1, .b={0x2B}, .width=16, .ifp=IFP_H},
+
+	/* 101.100 */
+	{.str="S^#24",		.cnt=1, .b={0x2C}, .width= 4, .ifp=IFP_F},
+	{.str="S^#24",		.cnt=1, .b={0x2C}, .width= 8, .ifp=IFP_D},
+	{.str="S^#24",		.cnt=1, .b={0x2C}, .width= 8, .ifp=IFP_G},
+	{.str="S^#24",		.cnt=1, .b={0x2C}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#26",		.cnt=1, .b={0x2D}, .width= 4, .ifp=IFP_F},
+	{.str="S^#26",		.cnt=1, .b={0x2D}, .width= 8, .ifp=IFP_D},
+	{.str="S^#26",		.cnt=1, .b={0x2D}, .width= 8, .ifp=IFP_G},
+	{.str="S^#26",		.cnt=1, .b={0x2D}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#28",		.cnt=1, .b={0x2E}, .width= 4, .ifp=IFP_F},
+	{.str="S^#28",		.cnt=1, .b={0x2E}, .width= 8, .ifp=IFP_D},
+	{.str="S^#28",		.cnt=1, .b={0x2E}, .width= 8, .ifp=IFP_G},
+	{.str="S^#28",		.cnt=1, .b={0x2E}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#30",		.cnt=1, .b={0x2F}, .width= 4, .ifp=IFP_F},
+	{.str="S^#30",		.cnt=1, .b={0x2F}, .width= 8, .ifp=IFP_D},
+	{.str="S^#30",		.cnt=1, .b={0x2F}, .width= 8, .ifp=IFP_G},
+	{.str="S^#30",		.cnt=1, .b={0x2F}, .width=16, .ifp=IFP_H},
+
+	/* 110.000 */
+	{.str="S^#32",		.cnt=1, .b={0x30}, .width= 4, .ifp=IFP_F},
+	{.str="S^#32",		.cnt=1, .b={0x30}, .width= 8, .ifp=IFP_D},
+	{.str="S^#32",		.cnt=1, .b={0x30}, .width= 8, .ifp=IFP_G},
+	{.str="S^#32",		.cnt=1, .b={0x30}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#36",		.cnt=1, .b={0x31}, .width= 4, .ifp=IFP_F},
+	{.str="S^#36",		.cnt=1, .b={0x31}, .width= 8, .ifp=IFP_D},
+	{.str="S^#36",		.cnt=1, .b={0x31}, .width= 8, .ifp=IFP_G},
+	{.str="S^#36",		.cnt=1, .b={0x31}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#40",		.cnt=1, .b={0x32}, .width= 4, .ifp=IFP_F},
+	{.str="S^#40",		.cnt=1, .b={0x32}, .width= 8, .ifp=IFP_D},
+	{.str="S^#40",		.cnt=1, .b={0x32}, .width= 8, .ifp=IFP_G},
+	{.str="S^#40",		.cnt=1, .b={0x32}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#44",		.cnt=1, .b={0x33}, .width= 4, .ifp=IFP_F},
+	{.str="S^#44",		.cnt=1, .b={0x33}, .width= 8, .ifp=IFP_D},
+	{.str="S^#44",		.cnt=1, .b={0x33}, .width= 8, .ifp=IFP_G},
+	{.str="S^#44",		.cnt=1, .b={0x33}, .width=16, .ifp=IFP_H},
+
+	/* 110.100 */
+	{.str="S^#48",		.cnt=1, .b={0x34}, .width= 4, .ifp=IFP_F},
+	{.str="S^#48",		.cnt=1, .b={0x34}, .width= 8, .ifp=IFP_D},
+	{.str="S^#48",		.cnt=1, .b={0x34}, .width= 8, .ifp=IFP_G},
+	{.str="S^#48",		.cnt=1, .b={0x34}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#52",		.cnt=1, .b={0x35}, .width= 4, .ifp=IFP_F},
+	{.str="S^#52",		.cnt=1, .b={0x35}, .width= 8, .ifp=IFP_D},
+	{.str="S^#52",		.cnt=1, .b={0x35}, .width= 8, .ifp=IFP_G},
+	{.str="S^#52",		.cnt=1, .b={0x35}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#56",		.cnt=1, .b={0x36}, .width= 4, .ifp=IFP_F},
+	{.str="S^#56",		.cnt=1, .b={0x36}, .width= 8, .ifp=IFP_D},
+	{.str="S^#56",		.cnt=1, .b={0x36}, .width= 8, .ifp=IFP_G},
+	{.str="S^#56",		.cnt=1, .b={0x36}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#60",		.cnt=1, .b={0x37}, .width= 4, .ifp=IFP_F},
+	{.str="S^#60",		.cnt=1, .b={0x37}, .width= 8, .ifp=IFP_D},
+	{.str="S^#60",		.cnt=1, .b={0x37}, .width= 8, .ifp=IFP_G},
+	{.str="S^#60",		.cnt=1, .b={0x37}, .width=16, .ifp=IFP_H},
+
+	/* 111.000 */
+	{.str="S^#64",		.cnt=1, .b={0x38}, .width= 4, .ifp=IFP_F},
+	{.str="S^#64",		.cnt=1, .b={0x38}, .width= 8, .ifp=IFP_D},
+	{.str="S^#64",		.cnt=1, .b={0x38}, .width= 8, .ifp=IFP_G},
+	{.str="S^#64",		.cnt=1, .b={0x38}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#72",		.cnt=1, .b={0x39}, .width= 4, .ifp=IFP_F},
+	{.str="S^#72",		.cnt=1, .b={0x39}, .width= 8, .ifp=IFP_D},
+	{.str="S^#72",		.cnt=1, .b={0x39}, .width= 8, .ifp=IFP_G},
+	{.str="S^#72",		.cnt=1, .b={0x39}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#80",		.cnt=1, .b={0x3A}, .width= 4, .ifp=IFP_F},
+	{.str="S^#80",		.cnt=1, .b={0x3A}, .width= 8, .ifp=IFP_D},
+	{.str="S^#80",		.cnt=1, .b={0x3A}, .width= 8, .ifp=IFP_G},
+	{.str="S^#80",		.cnt=1, .b={0x3A}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#88",		.cnt=1, .b={0x3B}, .width= 4, .ifp=IFP_F},
+	{.str="S^#88",		.cnt=1, .b={0x3B}, .width= 8, .ifp=IFP_D},
+	{.str="S^#88",		.cnt=1, .b={0x3B}, .width= 8, .ifp=IFP_G},
+	{.str="S^#88",		.cnt=1, .b={0x3B}, .width=16, .ifp=IFP_H},
+
+	/* 111.100 */
+	{.str="S^#96",		.cnt=1, .b={0x3C}, .width= 4, .ifp=IFP_F},
+	{.str="S^#96",		.cnt=1, .b={0x3C}, .width= 8, .ifp=IFP_D},
+	{.str="S^#96",		.cnt=1, .b={0x3C}, .width= 8, .ifp=IFP_G},
+	{.str="S^#96",		.cnt=1, .b={0x3C}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#104",		.cnt=1, .b={0x3D}, .width= 4, .ifp=IFP_F},
+	{.str="S^#104",		.cnt=1, .b={0x3D}, .width= 8, .ifp=IFP_D},
+	{.str="S^#104",		.cnt=1, .b={0x3D}, .width= 8, .ifp=IFP_G},
+	{.str="S^#104",		.cnt=1, .b={0x3D}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#112",		.cnt=1, .b={0x3E}, .width= 4, .ifp=IFP_F},
+	{.str="S^#112",		.cnt=1, .b={0x3E}, .width= 8, .ifp=IFP_D},
+	{.str="S^#112",		.cnt=1, .b={0x3E}, .width= 8, .ifp=IFP_G},
+	{.str="S^#112",		.cnt=1, .b={0x3E}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#120",		.cnt=1, .b={0x3F}, .width= 4, .ifp=IFP_F},
+	{.str="S^#120",		.cnt=1, .b={0x3F}, .width= 8, .ifp=IFP_D},
+	{.str="S^#120",		.cnt=1, .b={0x3F}, .width= 8, .ifp=IFP_G},
+	{.str="S^#120",		.cnt=1, .b={0x3F}, .width=16, .ifp=IFP_H},
+
+	/* FIXME fp values that don't fit into lit6 */
+
+	/***/
+
+	/* ints */
+
+	{.str="I^#0",		.cnt=2, .b={0x8F, 0x00},	.width=1, .ifp=IFP_INT},
+	{.str="I^#255",		.cnt=2, .b={0x8F, 0xFF},	.width=1, .ifp=IFP_INT},
+
+	{.str="I^#0",		.cnt=3, .b={0x8F, 0x00,0x00},	.width=2, .ifp=IFP_INT},
+	{.str="I^#255",		.cnt=3, .b={0x8F, 0xFF,0x00},	.width=2, .ifp=IFP_INT},
+	{.str="I^#65535",	.cnt=3, .b={0x8F, 0xFF,0xFF},	.width=2, .ifp=IFP_INT},
+
+	{.str="I^#0",		.cnt=5, .b={0x8F, 0x00,0x00,0x00,0x00},	.width=4, .ifp=IFP_INT},
+	{.str="I^#255",		.cnt=5, .b={0x8F, 0xFF,0x00,0x00,0x00},	.width=4, .ifp=IFP_INT},
+	{.str="I^#^XFFFFFFFF",	.cnt=5, .b={0x8F, 0xFF,0xFF,0xFF,0xFF},	.width=4, .ifp=IFP_INT},
+
+	{.str="I^#0",		.cnt=9, .b={0x8F, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00},	.width=8, .ifp=IFP_INT},
+	{.str="I^#255",		.cnt=9, .b={0x8F, 0xFF,0x00,0x00,0x00, 0x00,0x00,0x00,0x00},	.width=8, .ifp=IFP_INT},
+	{.str="I^#^XFFFFFFFFFFFFFFFF",
+				.cnt=9, .b={0x8F, 0xFF,0xFF,0xFF,0xFF, 0xFF,0xFF,0xFF,0xFF},.width=8, .ifp=IFP_INT},
+
+	{.str="I^#0",		.cnt=17, .b={0x8F, 0x00,0x00,0x00,0x00,
+	                                           0x00,0x00,0x00,0x00,
+	                                           0x00,0x00,0x00,0x00,
+	                                           0x00,0x00,0x00,0x00},.width=16, .ifp=IFP_INT},
+	{.str="I^#255",		.cnt=17, .b={0x8F, 0xFF,0x00,0x00,0x00,
+	                                           0x00,0x00,0x00,0x00,
+	                                           0x00,0x00,0x00,0x00,
+	                                           0x00,0x00,0x00,0x00},.width=16, .ifp=IFP_INT},
+	{.str="I^#^XFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+				.cnt=17, .b={0x8F, 0xFF,0xFF,0xFF,0xFF,
+				                   0xFF,0xFF,0xFF,0xFF,
+				                   0xFF,0xFF,0xFF,0xFF,
+				                   0xFF,0xFF,0xFF,0xFF},.width=16, .ifp=IFP_INT},
+
+	/* fp */
+
+	{.str="I^#0",		.cnt=5, .b={0x8F, 0x00,0x00,0x00,0x00}, .width= 4, .ifp=IFP_F},
+	{.str="I^#0.",		.cnt=5, .b={0x8F, 0x00,0x00,0x00,0x00}, .width= 4, .ifp=IFP_F},
+	{.str="I^#000.000",	.cnt=5, .b={0x8F, 0x00,0x00,0x00,0x00}, .width= 4, .ifp=IFP_F},
+	{.str="I^#1",		.cnt=5, .b={0x8F, 0x80,0x40,0x00,0x00}, .width= 4, .ifp=IFP_F},
+	{.str="I^#1.1",		.cnt=5, .b={0x8F, 0x8C,0x40,0xCD,0xCC}, .width= 4, .ifp=IFP_F},
+	{.str="I^#1.1415",	.cnt=5, .b={0x8F, 0x92,0x40,0xAC,0x1C}, .width= 4, .ifp=IFP_F},
+	{.str="I^#123.1",	.cnt=5, .b={0x8F, 0xF6,0x43,0x33,0x33}, .width= 4, .ifp=IFP_F},
+	{.str="I^#-123.1",	.cnt=5, .b={0x8F, 0xF6,0xC3,0x33,0x33}, .width= 4, .ifp=IFP_F},
+	{.str="I^#123.1E3",	.cnt=5, .b={0x8F, 0xF0,0x48,0x00,0x6E}, .width= 4, .ifp=IFP_F},
+	{.str="I^#123.1E-3",	.cnt=5, .b={0x8F, 0xFC,0x3E,0xDA,0x1B}, .width= 4, .ifp=IFP_F},
+	{.str="I^#123.1E12",	.cnt=5, .b={0x8F, 0xDF,0x57,0xE8,0xEA}, .width= 4, .ifp=IFP_F},
+	{.str="I^#123.1E-12",	.cnt=5, .b={0x8F, 0x07,0x30,0x92,0x59}, .width= 4, .ifp=IFP_F},
+
+	{.str="I^#123.1E-12",	.cnt=9, .b={0x8F, 0x07,0x30,0x91,0x59, 0x79,0xD3,0xDA,0x40}, .width= 8, .ifp=IFP_D},
+	{.str="I^#123.1E-12",	.cnt=9, .b={0x8F, 0x00,0x3E,0x32,0xEB, 0x6F,0x3A,0x1B,0x28}, .width= 8, .ifp=IFP_G},
+	{.str="I^#123.1E-123",	.cnt=17,.b={0x8F, 0x6F,0x3E,0x81,0x45,
+	                                          0x75,0x03,0x54,0x8A,
+	                                          0x39,0xD5,0x0A,0x5C,
+	                                          0xD7,0x79,0x8F,0xDE}, .width=16, .ifp=IFP_H},
+
+	/***/
+
+	{.str="r0",		.cnt=1, .b={0x50}, .width=1, .ifp=IFP_INT},
+	{.str="r4",		.cnt=1, .b={0x54}, .width=1, .ifp=IFP_INT},
+	{.str="fp",		.cnt=1, .b={0x5D}, .width=1, .ifp=IFP_INT},
+	{.str="r13",		.cnt=1, .b={0x5D}, .width=1, .ifp=IFP_INT},
+
+	{.str="(fp)",		.cnt=1, .b={0x6D}, .width=1, .ifp=IFP_INT},
+	{.str="(r13)",		.cnt=1, .b={0x6D}, .width=1, .ifp=IFP_INT},
+
+	{.str="-(fp)",		.cnt=1, .b={0x7D}, .width=1, .ifp=IFP_INT},
+	{.str="-(r13)",		.cnt=1, .b={0x7D}, .width=1, .ifp=IFP_INT},
+
+	{.str="(r2)+",		.cnt=1, .b={0x82}, .width=1, .ifp=IFP_INT},
+	{.str="(r12)+",		.cnt=1, .b={0x8C}, .width=1, .ifp=IFP_INT},
+
+	{.str="@#^X12345678",	.cnt=5, .b={0x9F, 0x78,0x56,0x34,0x12}, .width=1, .ifp=IFP_INT},
+
+	{.str="@(fp)+",		.cnt=1, .b={0x9D}, .width=1, .ifp=IFP_INT},
+	{.str="@(r12)+",	.cnt=1, .b={0x9C}, .width=1, .ifp=IFP_INT},
+
+	/* pcrel/disp */
+	{.str="B^0xCAFEBB00",	.cnt=2, .b={0xAF, 0x42}, .width=1, .ifp=IFP_INT},
+	{.str="B^100(fp)",	.cnt=2, .b={0xAD, 0x64}, .width=1, .ifp=IFP_INT},
+	{.str="@B^^XCAFEBB00",	.cnt=2, .b={0xBF, 0x42}, .width=1, .ifp=IFP_INT},
+	{.str="@B^100(fp)",	.cnt=2, .b={0xBD, 0x64}, .width=1, .ifp=IFP_INT},
+
+	{.str="W^0xCAFEC000",	.cnt=3, .b={0xCF, 0x42,0x05}, .width=1, .ifp=IFP_INT},
+	{.str="W^1000(fp)",	.cnt=3, .b={0xCD, 0xE8,0x03}, .width=1, .ifp=IFP_INT},
+	{.str="@W^^XCAFEC000",	.cnt=3, .b={0xDF, 0x42,0x05}, .width=1, .ifp=IFP_INT},
+	{.str="@W^1000(fp)",	.cnt=3, .b={0xDD, 0xE8,0x03}, .width=1, .ifp=IFP_INT},
+
+	{.str="L^0xCC00C000",	.cnt=5, .b={0xEF, 0x42,0x05,0x02,0x01}, .width=1, .ifp=IFP_INT},
+	{.str="L^100000(fp)",	.cnt=5, .b={0xED, 0xA0,0x86,0x01,0x00}, .width=1, .ifp=IFP_INT},
+	{.str="@L^^XCC00C000",	.cnt=5, .b={0xFF, 0x42,0x05,0x02,0x01}, .width=1, .ifp=IFP_INT},
+	{.str="@L^100000(fp)",	.cnt=5, .b={0xFD, 0xA0,0x86,0x01,0x00}, .width=1, .ifp=IFP_INT},
+
+
+	/* indexed operands */
+	{.str="(r2)[fp]",		.cnt=2, .b={0x4D,0x62}, .width=1, .ifp=IFP_INT},
+	{.str="-(r2)[fp]",		.cnt=2, .b={0x4D,0x72}, .width=1, .ifp=IFP_INT},
+	{.str="(r2)+[fp]",		.cnt=2, .b={0x4D,0x82}, .width=1, .ifp=IFP_INT},
+	{.str="@#0x12345678[fp]",	.cnt=6, .b={0x4D,0x9F, 0x78,0x56,0x34,0x12}, .width=1, .ifp=IFP_INT},
+	{.str="@(r2)+[fp]",		.cnt=2, .b={0x4D,0x92}, .width=1, .ifp=IFP_INT},
+
+
+	{.str="B^0xCAFEBB00[fp]",	.cnt=3, .b={0x4D,0xAF, 0x42}, .width=1, .ifp=IFP_INT},
+	{.str="B^100(r2)[fp]",		.cnt=3, .b={0x4D,0xA2, 0x64}, .width=1, .ifp=IFP_INT},
+	{.str="@B^^XCAFEBB00[fp]",	.cnt=3, .b={0x4D,0xBF, 0x42}, .width=1, .ifp=IFP_INT},
+	{.str="@B^100(r2)[fp]",		.cnt=3, .b={0x4D,0xB2, 0x64}, .width=1, .ifp=IFP_INT},
+
+	{.str="W^0xCAFEC000[fp]",	.cnt=4, .b={0x4D,0xCF, 0x42,0x05}, .width=1, .ifp=IFP_INT},
+	{.str="W^1000(r2)[fp]",		.cnt=4, .b={0x4D,0xC2, 0xE8,0x03}, .width=1, .ifp=IFP_INT},
+	{.str="@W^^XCAFEC000[fp]",	.cnt=4, .b={0x4D,0xDF, 0x42,0x05}, .width=1, .ifp=IFP_INT},
+	{.str="@W^1000(r2)[fp]",	.cnt=4, .b={0x4D,0xD2, 0xE8,0x03}, .width=1, .ifp=IFP_INT},
+
+	{.str="L^0xCC00C000[fp]",	.cnt=6, .b={0x4D,0xEF, 0x42,0x05,0x02,0x01}, .width=1, .ifp=IFP_INT},
+	{.str="L^100000(r2)[fp]",	.cnt=6, .b={0x4D,0xE2, 0xA0,0x86,0x01,0x00}, .width=1, .ifp=IFP_INT},
+	{.str="@L^^XCC00C000[fp]",	.cnt=6, .b={0x4D,0xFF, 0x42,0x05,0x02,0x01}, .width=1, .ifp=IFP_INT},
+	{.str="@L^100000(r2)[fp]",	.cnt=6, .b={0x4D,0xF2, 0xA0,0x86,0x01,0x00}, .width=1, .ifp=IFP_INT},
+
+	/* check operands that are invalid (or almost invalid)
+	 */
+
+	/* operands based on the pc are usually not okay -- these certainly aren't */
+	{.str="pc",			.cnt=-1, .width=1, .ifp=IFP_INT},
+	{.str="-(pc)",			.cnt=-1, .width=1, .ifp=IFP_INT},
+#if 0
+	{.str="(pc)+",			.cnt=-1, .width=1, .ifp=IFP_INT},	/* FIXME this test fails */
+	{.str="@(pc)+",			.cnt=-1, .width=1, .ifp=IFP_INT},	/* FIXME this test fails */
+#endif
+
+	/* r14 -- r14/r15, r14/r15/r16/r17 -- so 64-bit/128-bit values are not okay */
+	{.str="r14",			.cnt=1, .b={0x5E}, .width= 1, .ifp=IFP_INT},
+	{.str="r14",			.cnt=1, .b={0x5E}, .width= 2, .ifp=IFP_INT},
+	{.str="r14",			.cnt=1, .b={0x5E}, .width= 4, .ifp=IFP_INT},
+	{.str="r14",			.cnt=-1, .width= 8, .ifp=IFP_INT},
+	{.str="r14",			.cnt=-1, .width=16, .ifp=IFP_INT},
+
+	/* r13, r13/r14 -- r13/r14/r15/r16 -- so 128-bit values are not okay */
+	{.str="r13",			.cnt=1, .b={0x5D}, .width= 1, .ifp=IFP_INT},
+	{.str="r13",			.cnt=1, .b={0x5D}, .width= 2, .ifp=IFP_INT},
+	{.str="r13",			.cnt=1, .b={0x5D}, .width= 4, .ifp=IFP_INT},
+	{.str="r13",			.cnt=1, .b={0x5D}, .width= 8, .ifp=IFP_INT},
+	{.str="r13",			.cnt=-1, .width=16, .ifp=IFP_INT},
+
+	/* r12, r12/r13, r12/r13/r14/r15 -- so 128-bit values are not okay */
+	{.str="r12",			.cnt=1, .b={0x5C}, .width= 1, .ifp=IFP_INT},
+	{.str="r12",			.cnt=1, .b={0x5C}, .width= 2, .ifp=IFP_INT},
+	{.str="r12",			.cnt=1, .b={0x5C}, .width= 4, .ifp=IFP_INT},
+	{.str="r12",			.cnt=1, .b={0x5C}, .width= 8, .ifp=IFP_INT},
+	{.str="r12",			.cnt=-1, .width=16, .ifp=IFP_INT},
+
+	/* r11/r12/r13/r14 -- 8/17/32/64/128-bit values are all okay */
+	{.str="r11",			.cnt=1, .b={0x5B}, .width= 1, .ifp=IFP_INT},
+	{.str="r11",			.cnt=1, .b={0x5B}, .width= 2, .ifp=IFP_INT},
+	{.str="r11",			.cnt=1, .b={0x5B}, .width= 4, .ifp=IFP_INT},
+	{.str="r11",			.cnt=1, .b={0x5B}, .width= 8, .ifp=IFP_INT},
+	{.str="r11",			.cnt=1, .b={0x5B}, .width=16, .ifp=IFP_INT},
+
+	/* using r14 is perfectly ok */
+	{.str="-(r14)",			.cnt=1, .b={0x7E}, .width= 1, .ifp=IFP_INT},
+	{.str="(r14)+",			.cnt=1, .b={0x8E}, .width= 1, .ifp=IFP_INT},
+	{.str="@(r14)+",		.cnt=1, .b={0x9E}, .width= 1, .ifp=IFP_INT},
+
+	/* Rn=Rx is an error for some addressing modes */
+	{.str="-(r2)[r2]",		.cnt=-1, .width=1, .ifp=IFP_INT},
+	{.str="(r2)+[r2]",		.cnt=-1, .width=1, .ifp=IFP_INT},
+	{.str="@(r2)+[r2]",		.cnt=-1, .width=1, .ifp=IFP_INT},
+
+	/* Rn=Rx is perfectly ok for other addressing modes */
+	{.str="B^100(r3)[r3]",		.cnt=3, .b={0x43,0xA3, 0x64}, .width=1, .ifp=IFP_INT},
+	{.str="@B^100(r3)[r3]",		.cnt=3, .b={0x43,0xB3, 0x64}, .width=1, .ifp=IFP_INT},
+
+	{.str="W^1000(r3)[r3]",		.cnt=4, .b={0x43,0xC3, 0xE8,0x03}, .width=1, .ifp=IFP_INT},
+	{.str="@W^1000(r3)[r3]",	.cnt=4, .b={0x43,0xD3, 0xE8,0x03}, .width=1, .ifp=IFP_INT},
+
+	{.str="L^100000(r3)[r3]",	.cnt=6, .b={0x43,0xE3, 0xA0,0x86,0x01,0x00}, .width=1, .ifp=IFP_INT},
+	{.str="@L^100000(r3)[r3]",	.cnt=6, .b={0x43,0xF3, 0xA0,0x86,0x01,0x00}, .width=1, .ifp=IFP_INT},
+
+	/* pc is not alloed as index register */
+	{.str="(r2)[pc]",		.cnt=-1, .width=1, .ifp=IFP_INT},
+	{.str="-(r2)[pc]",		.cnt=-1, .width=1, .ifp=IFP_INT},
+	{.str="(r2)+[pc]",		.cnt=-1, .width=1, .ifp=IFP_INT},
+	{.str="@#0x12345678[pc]",	.cnt=-1, .width=1, .ifp=IFP_INT},
+	{.str="@(r2)+[pc]",		.cnt=-1, .width=1, .ifp=IFP_INT},
+	{.str="B^100(r3)[pc]",		.cnt=-1, .width=1, .ifp=IFP_INT},
+	{.str="@B^100(r3)[pc]",		.cnt=-1, .width=1, .ifp=IFP_INT},
+	{.str="W^1000(r3)[pc]",		.cnt=-1, .width=1, .ifp=IFP_INT},
+	{.str="@W^1000(r3)[pc]",	.cnt=-1, .width=1, .ifp=IFP_INT},
+	{.str="L^100000(r3)[pc]",	.cnt=-1, .width=1, .ifp=IFP_INT},
+	{.str="@L^100000(r3)[pc]",	.cnt=-1, .width=1, .ifp=IFP_INT},
+
+	/* non-standard ways to write PC-relative addresses -- all ok */
+	{.str="B^100(pc)",		.cnt=2, .b={0xAF, 0x64}, .width=1, .ifp=IFP_INT},
+	{.str="@B^100(pc)",		.cnt=2, .b={0xBF, 0x64}, .width=1, .ifp=IFP_INT},
+	{.str="W^1000(pc)",		.cnt=3, .b={0xCF, 0xE8,0x03}, .width=1, .ifp=IFP_INT},
+	{.str="@W^1000(pc)",		.cnt=3, .b={0xDF, 0xE8,0x03}, .width=1, .ifp=IFP_INT},
+	{.str="L^100000(pc)",		.cnt=5, .b={0xEF, 0xA0,0x86,0x01,0x00}, .width=1, .ifp=IFP_INT},
+	{.str="@L^100000(pc)",		.cnt=5, .b={0xFF, 0xA0,0x86,0x01,0x00}, .width=1, .ifp=IFP_INT},
+};
+
+
+void test_asm()
+{
+	int	pass_cnt = 0;
+
+	printf("Assembler tests\n");
+	printf("---------------\n");
+	for (unsigned tst=0; tst < ARRAY_SIZE(asm_vax); tst++) {
+		uint8_t	b[MAX_OPLEN] = {};
+		int	bytes;
+		bool	valid;
+
+		parse_init(asm_vax[tst].str);
+		bytes = op_asm_vax(b, 0xCAFEBABE, asm_vax[tst].width, asm_vax[tst].ifp);
+		/* FIXME parse_ok? */
+		parse_done();
+
+		valid = (bytes != -1) ? op_val(b, asm_vax[tst].width) : false;
+
+#if 0
+		if ((bytes != -1) && !op_val(b, asm_vax[tst].width)) {
+			char	*s;
+
+			switch (asm_vax[tst].ifp) {
+			case IFP_INT:	s = "int";  break;
+			case IFP_F:	s = "F";    break;
+			case IFP_D:	s = "D";    break;
+			case IFP_G:	s = "G";    break;
+			case IFP_H:	s = "H";    break;
+			}
+
+			printf("%3d/%3d: %2d %3s  |%s|                          *** killed by op_val()\n",
+				tst, (int) ARRAY_SIZE(asm_vax), asm_vax[tst].width, s, asm_vax[tst].str);
+		}
+#endif
+
+		/* did the test pass? */
+		bool	testok = true;
+		if (asm_vax[tst].cnt == -1) {
+			/* was not supposed to parse/be a valid operand */
+			if (valid)
+				testok = false;
+		} else {
+			if (asm_vax[tst].cnt != bytes)
+				testok = false;
+			else {
+				for (int i=0; i < bytes; i++)
+					if (asm_vax[tst].b[i] != b[i]) {
+						testok = false;
+						break;
+					}
+			}
+		}
+
+		/* stats/output for the test*/
+		pass_cnt += !!testok;
+
+		if (!testok) {
+			char	*s;
+
+			switch (asm_vax[tst].ifp) {
+			case IFP_INT:	s = "int";  break;
+			case IFP_F:	s = "F";    break;
+			case IFP_D:	s = "D";    break;
+			case IFP_G:	s = "G";    break;
+			case IFP_H:	s = "H";    break;
+			}
+
+			printf("%3d/%3d: %2d %3s  |%s| \n", tst, (int) ARRAY_SIZE(asm_vax),
+				asm_vax[tst].width, s, asm_vax[tst].str);
+
+			printf("%12sexp:  ", "");
+			for (int i=0; i < asm_vax[tst].cnt; i++) {
+				if (i > 0)
+					printf(" ");
+
+				if ((i >= bytes) || (asm_vax[tst].b[i] != b[i]))
+					printf("%s", GREEN);
+				printf("%02X", asm_vax[tst].b[i]);
+				if ((i >= bytes) || (asm_vax[tst].b[i] != b[i]))
+					printf("%s", NORM);
+			}
+			if (asm_vax[tst].cnt == -1)
+				printf("--");
+			printf("\n");
+
+			printf("%12sgot:  ", "");
+			for (int i=0; i < bytes; i++) {
+				if (i > 0)
+					printf(" ");
+
+				if ((i >= asm_vax[tst].cnt) || (asm_vax[tst].b[i] != b[i]))
+					printf("%s", BOLD);
+				printf("%02X", b[i]);
+				if ((i >= asm_vax[tst].cnt) || (asm_vax[tst].b[i] != b[i]))
+					printf("%s", NORM);
+			}
+			if (bytes == -1) {
+				if (asm_vax[tst].cnt != -1)
+					printf("%s", BOLD);
+				printf("--");
+				if (asm_vax[tst].cnt != -1)
+					printf("%s", NORM);
+			}
+			printf("\n");
+			printf("\n");
+		}
+
+	}
+
+	printf("%3d/%3d tests passed.\n", pass_cnt, (int) ARRAY_SIZE(asm_vax));
+	printf("\n");
+}
+
+
+/***/
+
+struct test_dis_case {
 	int	cnt;
 	uint8_t	b[MAX_OPLEN];
 	int	width;
 	enum ifp ifp;
+	char	*str;
 };
 
-typedef struct testcase test;
 
-/* common test cases */
+struct test_dis_case dis_vax[] = {
+	/* lit6, integers */
+	{.cnt=1, .b={0x00}, .width=1, .ifp=IFP_INT, .str="S^#0x00"},
+	{.cnt=1, .b={0x01}, .width=1, .ifp=IFP_INT, .str="S^#0x01"},
+	{.cnt=1, .b={0x3F}, .width=1, .ifp=IFP_INT, .str="S^#0x3F"},
 
-test tests[] = {
-	{.cnt=0, .width=1},
-	{.cnt=1, .b={0x00}, .width=1},
-	{.cnt=1, .b={0x01}, .width=1},
-	{.cnt=1, .b={0x3F}, .width=1},
-	{.cnt=1, .b={0x00}, .width=4, .ifp=IFP_F},
-	{.cnt=1, .b={0x01}, .width=4, .ifp=IFP_F},
-	{.cnt=1, .b={0x3F}, .width=4, .ifp=IFP_F},
-	{.cnt=1, .b={0x00}, .width=8, .ifp=IFP_D},
-	{.cnt=1, .b={0x01}, .width=8, .ifp=IFP_D},
-	{.cnt=1, .b={0x3F}, .width=8, .ifp=IFP_D},
-	{.cnt=1, .b={0x00}, .width=8, .ifp=IFP_G},
-	{.cnt=1, .b={0x01}, .width=8, .ifp=IFP_G},
-	{.cnt=1, .b={0x3F}, .width=8, .ifp=IFP_G},
-	{.cnt=1, .b={0x50}, .width=4},
-	{.cnt=1, .b={0x57}, .width=4},
-	{.cnt=1, .b={0x5F}, .width=4},
+	/* lit6, floats */
+	/* 000.000 */
+	{.str="S^#0.5",		.cnt=1, .b={0x00}, .width= 4, .ifp=IFP_F},
+	{.str="S^#0.5",		.cnt=1, .b={0x00}, .width= 8, .ifp=IFP_D},
+	{.str="S^#0.5",		.cnt=1, .b={0x00}, .width= 8, .ifp=IFP_G},
+	{.str="S^#0.5",		.cnt=1, .b={0x00}, .width=16, .ifp=IFP_H},
 
-	{.cnt=2, .b={0x43,0x67}, .width=8},
-	{.cnt=2, .b={0x43,0x63}, .width=8},
-	{.cnt=2, .b={0x43,0x6F}, .width=8},
-	{.cnt=2, .b={0x4F,0x67}, .width=8},
+	{.str="S^#0.5625",	.cnt=1, .b={0x01}, .width= 4, .ifp=IFP_F},
+	{.str="S^#0.5625",	.cnt=1, .b={0x01}, .width= 8, .ifp=IFP_D},
+	{.str="S^#0.5625",	.cnt=1, .b={0x01}, .width= 8, .ifp=IFP_G},
+	{.str="S^#0.5625",	.cnt=1, .b={0x01}, .width=16, .ifp=IFP_H},
 
-	{.cnt=2, .b={0x8F,0x67}, .width=1},
-	{.cnt=3, .b={0x8F,0x67,0x12}, .width=2},
-	{.cnt=5, .b={0x8F,0x78,0x56,0x34,0x12}, .width=4},
-	{.cnt=9, .b={0x8F,0xF0,0xDE,0xBC,0x9A,0x78,0x56,0x34,0x12}, .width=8},
+	{.str="S^#0.625",	.cnt=1, .b={0x02}, .width= 4, .ifp=IFP_F},
+	{.str="S^#0.625",	.cnt=1, .b={0x02}, .width= 8, .ifp=IFP_D},
+	{.str="S^#0.625",	.cnt=1, .b={0x02}, .width= 8, .ifp=IFP_G},
+	{.str="S^#0.625",	.cnt=1, .b={0x02}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#0.6875",	.cnt=1, .b={0x03}, .width= 4, .ifp=IFP_F},
+	{.str="S^#0.6875",	.cnt=1, .b={0x03}, .width= 8, .ifp=IFP_D},
+	{.str="S^#0.6875",	.cnt=1, .b={0x03}, .width= 8, .ifp=IFP_G},
+	{.str="S^#0.6875",	.cnt=1, .b={0x03}, .width=16, .ifp=IFP_H},
+
+	/* 000.100 */
+	{.str="S^#0.75",	.cnt=1, .b={0x04}, .width= 4, .ifp=IFP_F},
+	{.str="S^#0.75",	.cnt=1, .b={0x04}, .width= 8, .ifp=IFP_D},
+	{.str="S^#0.75",	.cnt=1, .b={0x04}, .width= 8, .ifp=IFP_G},
+	{.str="S^#0.75",	.cnt=1, .b={0x04}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#0.8125",	.cnt=1, .b={0x05}, .width= 4, .ifp=IFP_F},
+	{.str="S^#0.8125",	.cnt=1, .b={0x05}, .width= 8, .ifp=IFP_D},
+	{.str="S^#0.8125",	.cnt=1, .b={0x05}, .width= 8, .ifp=IFP_G},
+	{.str="S^#0.8125",	.cnt=1, .b={0x05}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#0.875",	.cnt=1, .b={0x06}, .width= 4, .ifp=IFP_F},
+	{.str="S^#0.875",	.cnt=1, .b={0x06}, .width= 8, .ifp=IFP_D},
+	{.str="S^#0.875",	.cnt=1, .b={0x06}, .width= 8, .ifp=IFP_G},
+	{.str="S^#0.875",	.cnt=1, .b={0x06}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#0.9375",	.cnt=1, .b={0x07}, .width= 4, .ifp=IFP_F},
+	{.str="S^#0.9375",	.cnt=1, .b={0x07}, .width= 8, .ifp=IFP_D},
+	{.str="S^#0.9375",	.cnt=1, .b={0x07}, .width= 8, .ifp=IFP_G},
+	{.str="S^#0.9375",	.cnt=1, .b={0x07}, .width=16, .ifp=IFP_H},
+
+	/* 001.000 */
+	{.str="S^#1",		.cnt=1, .b={0x08}, .width= 4, .ifp=IFP_F},
+	{.str="S^#1",		.cnt=1, .b={0x08}, .width= 8, .ifp=IFP_D},
+	{.str="S^#1",		.cnt=1, .b={0x08}, .width= 8, .ifp=IFP_G},
+	{.str="S^#1",		.cnt=1, .b={0x08}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#1.125",	.cnt=1, .b={0x09}, .width= 4, .ifp=IFP_F},
+	{.str="S^#1.125",	.cnt=1, .b={0x09}, .width= 8, .ifp=IFP_D},
+	{.str="S^#1.125",	.cnt=1, .b={0x09}, .width= 8, .ifp=IFP_G},
+	{.str="S^#1.125",	.cnt=1, .b={0x09}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#1.25",	.cnt=1, .b={0x0A}, .width= 4, .ifp=IFP_F},
+	{.str="S^#1.25",	.cnt=1, .b={0x0A}, .width= 8, .ifp=IFP_D},
+	{.str="S^#1.25",	.cnt=1, .b={0x0A}, .width= 8, .ifp=IFP_G},
+	{.str="S^#1.25",	.cnt=1, .b={0x0A}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#1.375",	.cnt=1, .b={0x0B}, .width= 4, .ifp=IFP_F},
+	{.str="S^#1.375",	.cnt=1, .b={0x0B}, .width= 8, .ifp=IFP_D},
+	{.str="S^#1.375",	.cnt=1, .b={0x0B}, .width= 8, .ifp=IFP_G},
+	{.str="S^#1.375",	.cnt=1, .b={0x0B}, .width=16, .ifp=IFP_H},
+
+	/* 001.100 */
+	{.str="S^#1.5",		.cnt=1, .b={0x0C}, .width= 4, .ifp=IFP_F},
+	{.str="S^#1.5",		.cnt=1, .b={0x0C}, .width= 8, .ifp=IFP_D},
+	{.str="S^#1.5",		.cnt=1, .b={0x0C}, .width= 8, .ifp=IFP_G},
+	{.str="S^#1.5",		.cnt=1, .b={0x0C}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#1.625",	.cnt=1, .b={0x0D}, .width= 4, .ifp=IFP_F},
+	{.str="S^#1.625",	.cnt=1, .b={0x0D}, .width= 8, .ifp=IFP_D},
+	{.str="S^#1.625",	.cnt=1, .b={0x0D}, .width= 8, .ifp=IFP_G},
+	{.str="S^#1.625",	.cnt=1, .b={0x0D}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#1.75",	.cnt=1, .b={0x0E}, .width= 4, .ifp=IFP_F},
+	{.str="S^#1.75",	.cnt=1, .b={0x0E}, .width= 8, .ifp=IFP_D},
+	{.str="S^#1.75",	.cnt=1, .b={0x0E}, .width= 8, .ifp=IFP_G},
+	{.str="S^#1.75",	.cnt=1, .b={0x0E}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#1.875",	.cnt=1, .b={0x0F}, .width= 4, .ifp=IFP_F},
+	{.str="S^#1.875",	.cnt=1, .b={0x0F}, .width= 8, .ifp=IFP_D},
+	{.str="S^#1.875",	.cnt=1, .b={0x0F}, .width= 8, .ifp=IFP_G},
+	{.str="S^#1.875",	.cnt=1, .b={0x0F}, .width=16, .ifp=IFP_H},
+
+	/* 010.000 */
+	{.str="S^#2",		.cnt=1, .b={0x10}, .width= 4, .ifp=IFP_F},
+	{.str="S^#2",		.cnt=1, .b={0x10}, .width= 8, .ifp=IFP_D},
+	{.str="S^#2",		.cnt=1, .b={0x10}, .width= 8, .ifp=IFP_G},
+	{.str="S^#2",		.cnt=1, .b={0x10}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#2.25",	.cnt=1, .b={0x11}, .width= 4, .ifp=IFP_F},
+	{.str="S^#2.25",	.cnt=1, .b={0x11}, .width= 8, .ifp=IFP_D},
+	{.str="S^#2.25",	.cnt=1, .b={0x11}, .width= 8, .ifp=IFP_G},
+	{.str="S^#2.25",	.cnt=1, .b={0x11}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#2.5",		.cnt=1, .b={0x12}, .width= 4, .ifp=IFP_F},
+	{.str="S^#2.5",		.cnt=1, .b={0x12}, .width= 8, .ifp=IFP_D},
+	{.str="S^#2.5",		.cnt=1, .b={0x12}, .width= 8, .ifp=IFP_G},
+	{.str="S^#2.5",		.cnt=1, .b={0x12}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#2.75",	.cnt=1, .b={0x13}, .width= 4, .ifp=IFP_F},
+	{.str="S^#2.75",	.cnt=1, .b={0x13}, .width= 8, .ifp=IFP_D},
+	{.str="S^#2.75",	.cnt=1, .b={0x13}, .width= 8, .ifp=IFP_G},
+	{.str="S^#2.75",	.cnt=1, .b={0x13}, .width=16, .ifp=IFP_H},
+
+	/* 010.100 */
+	{.str="S^#3",		.cnt=1, .b={0x14}, .width= 4, .ifp=IFP_F},
+	{.str="S^#3",		.cnt=1, .b={0x14}, .width= 8, .ifp=IFP_D},
+	{.str="S^#3",		.cnt=1, .b={0x14}, .width= 8, .ifp=IFP_G},
+	{.str="S^#3",		.cnt=1, .b={0x14}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#3.25",	.cnt=1, .b={0x15}, .width= 4, .ifp=IFP_F},
+	{.str="S^#3.25",	.cnt=1, .b={0x15}, .width= 8, .ifp=IFP_D},
+	{.str="S^#3.25",	.cnt=1, .b={0x15}, .width= 8, .ifp=IFP_G},
+	{.str="S^#3.25",	.cnt=1, .b={0x15}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#3.5",		.cnt=1, .b={0x16}, .width= 4, .ifp=IFP_F},
+	{.str="S^#3.5",		.cnt=1, .b={0x16}, .width= 8, .ifp=IFP_D},
+	{.str="S^#3.5",		.cnt=1, .b={0x16}, .width= 8, .ifp=IFP_G},
+	{.str="S^#3.5",		.cnt=1, .b={0x16}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#3.75",	.cnt=1, .b={0x17}, .width= 4, .ifp=IFP_F},
+	{.str="S^#3.75",	.cnt=1, .b={0x17}, .width= 8, .ifp=IFP_D},
+	{.str="S^#3.75",	.cnt=1, .b={0x17}, .width= 8, .ifp=IFP_G},
+	{.str="S^#3.75",	.cnt=1, .b={0x17}, .width=16, .ifp=IFP_H},
+
+	/* 011.000 */
+	{.str="S^#4",		.cnt=1, .b={0x18}, .width= 4, .ifp=IFP_F},
+	{.str="S^#4",		.cnt=1, .b={0x18}, .width= 8, .ifp=IFP_D},
+	{.str="S^#4",		.cnt=1, .b={0x18}, .width= 8, .ifp=IFP_G},
+	{.str="S^#4",		.cnt=1, .b={0x18}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#4.5",		.cnt=1, .b={0x19}, .width= 4, .ifp=IFP_F},
+	{.str="S^#4.5",		.cnt=1, .b={0x19}, .width= 8, .ifp=IFP_D},
+	{.str="S^#4.5",		.cnt=1, .b={0x19}, .width= 8, .ifp=IFP_G},
+	{.str="S^#4.5",		.cnt=1, .b={0x19}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#5",		.cnt=1, .b={0x1A}, .width= 4, .ifp=IFP_F},
+	{.str="S^#5",		.cnt=1, .b={0x1A}, .width= 8, .ifp=IFP_D},
+	{.str="S^#5",		.cnt=1, .b={0x1A}, .width= 8, .ifp=IFP_G},
+	{.str="S^#5",		.cnt=1, .b={0x1A}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#5.5",		.cnt=1, .b={0x1B}, .width= 4, .ifp=IFP_F},
+	{.str="S^#5.5",		.cnt=1, .b={0x1B}, .width= 8, .ifp=IFP_D},
+	{.str="S^#5.5",		.cnt=1, .b={0x1B}, .width= 8, .ifp=IFP_G},
+	{.str="S^#5.5",		.cnt=1, .b={0x1B}, .width=16, .ifp=IFP_H},
+
+	/* 011.100 */
+	{.str="S^#6",		.cnt=1, .b={0x1C}, .width= 4, .ifp=IFP_F},
+	{.str="S^#6",		.cnt=1, .b={0x1C}, .width= 8, .ifp=IFP_D},
+	{.str="S^#6",		.cnt=1, .b={0x1C}, .width= 8, .ifp=IFP_G},
+	{.str="S^#6",		.cnt=1, .b={0x1C}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#6.5",		.cnt=1, .b={0x1D}, .width= 4, .ifp=IFP_F},
+	{.str="S^#6.5",		.cnt=1, .b={0x1D}, .width= 8, .ifp=IFP_D},
+	{.str="S^#6.5",		.cnt=1, .b={0x1D}, .width= 8, .ifp=IFP_G},
+	{.str="S^#6.5",		.cnt=1, .b={0x1D}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#7",		.cnt=1, .b={0x1E}, .width= 4, .ifp=IFP_F},
+	{.str="S^#7",		.cnt=1, .b={0x1E}, .width= 8, .ifp=IFP_D},
+	{.str="S^#7",		.cnt=1, .b={0x1E}, .width= 8, .ifp=IFP_G},
+	{.str="S^#7",		.cnt=1, .b={0x1E}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#7.5",		.cnt=1, .b={0x1F}, .width= 4, .ifp=IFP_F},
+	{.str="S^#7.5",		.cnt=1, .b={0x1F}, .width= 8, .ifp=IFP_D},
+	{.str="S^#7.5",		.cnt=1, .b={0x1F}, .width= 8, .ifp=IFP_G},
+	{.str="S^#7.5",		.cnt=1, .b={0x1F}, .width=16, .ifp=IFP_H},
+
+	/* 100.000 */
+	{.str="S^#8",		.cnt=1, .b={0x20}, .width= 4, .ifp=IFP_F},
+	{.str="S^#8",		.cnt=1, .b={0x20}, .width= 8, .ifp=IFP_D},
+	{.str="S^#8",		.cnt=1, .b={0x20}, .width= 8, .ifp=IFP_G},
+	{.str="S^#8",		.cnt=1, .b={0x20}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#9",		.cnt=1, .b={0x21}, .width= 4, .ifp=IFP_F},
+	{.str="S^#9",		.cnt=1, .b={0x21}, .width= 8, .ifp=IFP_D},
+	{.str="S^#9",		.cnt=1, .b={0x21}, .width= 8, .ifp=IFP_G},
+	{.str="S^#9",		.cnt=1, .b={0x21}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#10",		.cnt=1, .b={0x22}, .width= 4, .ifp=IFP_F},
+	{.str="S^#10",		.cnt=1, .b={0x22}, .width= 8, .ifp=IFP_D},
+	{.str="S^#10",		.cnt=1, .b={0x22}, .width= 8, .ifp=IFP_G},
+	{.str="S^#10",		.cnt=1, .b={0x22}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#11",		.cnt=1, .b={0x23}, .width= 4, .ifp=IFP_F},
+	{.str="S^#11",		.cnt=1, .b={0x23}, .width= 8, .ifp=IFP_D},
+	{.str="S^#11",		.cnt=1, .b={0x23}, .width= 8, .ifp=IFP_G},
+	{.str="S^#11",		.cnt=1, .b={0x23}, .width=16, .ifp=IFP_H},
+
+	/* 100.100 */
+	{.str="S^#12",		.cnt=1, .b={0x24}, .width= 4, .ifp=IFP_F},
+	{.str="S^#12",		.cnt=1, .b={0x24}, .width= 8, .ifp=IFP_D},
+	{.str="S^#12",		.cnt=1, .b={0x24}, .width= 8, .ifp=IFP_G},
+	{.str="S^#12",		.cnt=1, .b={0x24}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#13",		.cnt=1, .b={0x25}, .width= 4, .ifp=IFP_F},
+	{.str="S^#13",		.cnt=1, .b={0x25}, .width= 8, .ifp=IFP_D},
+	{.str="S^#13",		.cnt=1, .b={0x25}, .width= 8, .ifp=IFP_G},
+	{.str="S^#13",		.cnt=1, .b={0x25}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#14",		.cnt=1, .b={0x26}, .width= 4, .ifp=IFP_F},
+	{.str="S^#14",		.cnt=1, .b={0x26}, .width= 8, .ifp=IFP_D},
+	{.str="S^#14",		.cnt=1, .b={0x26}, .width= 8, .ifp=IFP_G},
+	{.str="S^#14",		.cnt=1, .b={0x26}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#15",		.cnt=1, .b={0x27}, .width= 4, .ifp=IFP_F},
+	{.str="S^#15",		.cnt=1, .b={0x27}, .width= 8, .ifp=IFP_D},
+	{.str="S^#15",		.cnt=1, .b={0x27}, .width= 8, .ifp=IFP_G},
+	{.str="S^#15",		.cnt=1, .b={0x27}, .width=16, .ifp=IFP_H},
+
+	/* 101.000 */
+	{.str="S^#16",		.cnt=1, .b={0x28}, .width= 4, .ifp=IFP_F},
+	{.str="S^#16",		.cnt=1, .b={0x28}, .width= 8, .ifp=IFP_D},
+	{.str="S^#16",		.cnt=1, .b={0x28}, .width= 8, .ifp=IFP_G},
+	{.str="S^#16",		.cnt=1, .b={0x28}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#18",		.cnt=1, .b={0x29}, .width= 4, .ifp=IFP_F},
+	{.str="S^#18",		.cnt=1, .b={0x29}, .width= 8, .ifp=IFP_D},
+	{.str="S^#18",		.cnt=1, .b={0x29}, .width= 8, .ifp=IFP_G},
+	{.str="S^#18",		.cnt=1, .b={0x29}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#20",		.cnt=1, .b={0x2A}, .width= 4, .ifp=IFP_F},
+	{.str="S^#20",		.cnt=1, .b={0x2A}, .width= 8, .ifp=IFP_D},
+	{.str="S^#20",		.cnt=1, .b={0x2A}, .width= 8, .ifp=IFP_G},
+	{.str="S^#20",		.cnt=1, .b={0x2A}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#22",		.cnt=1, .b={0x2B}, .width= 4, .ifp=IFP_F},
+	{.str="S^#22",		.cnt=1, .b={0x2B}, .width= 8, .ifp=IFP_D},
+	{.str="S^#22",		.cnt=1, .b={0x2B}, .width= 8, .ifp=IFP_G},
+	{.str="S^#22",		.cnt=1, .b={0x2B}, .width=16, .ifp=IFP_H},
+
+	/* 101.100 */
+	{.str="S^#24",		.cnt=1, .b={0x2C}, .width= 4, .ifp=IFP_F},
+	{.str="S^#24",		.cnt=1, .b={0x2C}, .width= 8, .ifp=IFP_D},
+	{.str="S^#24",		.cnt=1, .b={0x2C}, .width= 8, .ifp=IFP_G},
+	{.str="S^#24",		.cnt=1, .b={0x2C}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#26",		.cnt=1, .b={0x2D}, .width= 4, .ifp=IFP_F},
+	{.str="S^#26",		.cnt=1, .b={0x2D}, .width= 8, .ifp=IFP_D},
+	{.str="S^#26",		.cnt=1, .b={0x2D}, .width= 8, .ifp=IFP_G},
+	{.str="S^#26",		.cnt=1, .b={0x2D}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#28",		.cnt=1, .b={0x2E}, .width= 4, .ifp=IFP_F},
+	{.str="S^#28",		.cnt=1, .b={0x2E}, .width= 8, .ifp=IFP_D},
+	{.str="S^#28",		.cnt=1, .b={0x2E}, .width= 8, .ifp=IFP_G},
+	{.str="S^#28",		.cnt=1, .b={0x2E}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#30",		.cnt=1, .b={0x2F}, .width= 4, .ifp=IFP_F},
+	{.str="S^#30",		.cnt=1, .b={0x2F}, .width= 8, .ifp=IFP_D},
+	{.str="S^#30",		.cnt=1, .b={0x2F}, .width= 8, .ifp=IFP_G},
+	{.str="S^#30",		.cnt=1, .b={0x2F}, .width=16, .ifp=IFP_H},
+
+	/* 110.000 */
+	{.str="S^#32",		.cnt=1, .b={0x30}, .width= 4, .ifp=IFP_F},
+	{.str="S^#32",		.cnt=1, .b={0x30}, .width= 8, .ifp=IFP_D},
+	{.str="S^#32",		.cnt=1, .b={0x30}, .width= 8, .ifp=IFP_G},
+	{.str="S^#32",		.cnt=1, .b={0x30}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#36",		.cnt=1, .b={0x31}, .width= 4, .ifp=IFP_F},
+	{.str="S^#36",		.cnt=1, .b={0x31}, .width= 8, .ifp=IFP_D},
+	{.str="S^#36",		.cnt=1, .b={0x31}, .width= 8, .ifp=IFP_G},
+	{.str="S^#36",		.cnt=1, .b={0x31}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#40",		.cnt=1, .b={0x32}, .width= 4, .ifp=IFP_F},
+	{.str="S^#40",		.cnt=1, .b={0x32}, .width= 8, .ifp=IFP_D},
+	{.str="S^#40",		.cnt=1, .b={0x32}, .width= 8, .ifp=IFP_G},
+	{.str="S^#40",		.cnt=1, .b={0x32}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#44",		.cnt=1, .b={0x33}, .width= 4, .ifp=IFP_F},
+	{.str="S^#44",		.cnt=1, .b={0x33}, .width= 8, .ifp=IFP_D},
+	{.str="S^#44",		.cnt=1, .b={0x33}, .width= 8, .ifp=IFP_G},
+	{.str="S^#44",		.cnt=1, .b={0x33}, .width=16, .ifp=IFP_H},
+
+	/* 110.100 */
+	{.str="S^#48",		.cnt=1, .b={0x34}, .width= 4, .ifp=IFP_F},
+	{.str="S^#48",		.cnt=1, .b={0x34}, .width= 8, .ifp=IFP_D},
+	{.str="S^#48",		.cnt=1, .b={0x34}, .width= 8, .ifp=IFP_G},
+	{.str="S^#48",		.cnt=1, .b={0x34}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#52",		.cnt=1, .b={0x35}, .width= 4, .ifp=IFP_F},
+	{.str="S^#52",		.cnt=1, .b={0x35}, .width= 8, .ifp=IFP_D},
+	{.str="S^#52",		.cnt=1, .b={0x35}, .width= 8, .ifp=IFP_G},
+	{.str="S^#52",		.cnt=1, .b={0x35}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#56",		.cnt=1, .b={0x36}, .width= 4, .ifp=IFP_F},
+	{.str="S^#56",		.cnt=1, .b={0x36}, .width= 8, .ifp=IFP_D},
+	{.str="S^#56",		.cnt=1, .b={0x36}, .width= 8, .ifp=IFP_G},
+	{.str="S^#56",		.cnt=1, .b={0x36}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#60",		.cnt=1, .b={0x37}, .width= 4, .ifp=IFP_F},
+	{.str="S^#60",		.cnt=1, .b={0x37}, .width= 8, .ifp=IFP_D},
+	{.str="S^#60",		.cnt=1, .b={0x37}, .width= 8, .ifp=IFP_G},
+	{.str="S^#60",		.cnt=1, .b={0x37}, .width=16, .ifp=IFP_H},
+
+	/* 111.000 */
+	{.str="S^#64",		.cnt=1, .b={0x38}, .width= 4, .ifp=IFP_F},
+	{.str="S^#64",		.cnt=1, .b={0x38}, .width= 8, .ifp=IFP_D},
+	{.str="S^#64",		.cnt=1, .b={0x38}, .width= 8, .ifp=IFP_G},
+	{.str="S^#64",		.cnt=1, .b={0x38}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#72",		.cnt=1, .b={0x39}, .width= 4, .ifp=IFP_F},
+	{.str="S^#72",		.cnt=1, .b={0x39}, .width= 8, .ifp=IFP_D},
+	{.str="S^#72",		.cnt=1, .b={0x39}, .width= 8, .ifp=IFP_G},
+	{.str="S^#72",		.cnt=1, .b={0x39}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#80",		.cnt=1, .b={0x3A}, .width= 4, .ifp=IFP_F},
+	{.str="S^#80",		.cnt=1, .b={0x3A}, .width= 8, .ifp=IFP_D},
+	{.str="S^#80",		.cnt=1, .b={0x3A}, .width= 8, .ifp=IFP_G},
+	{.str="S^#80",		.cnt=1, .b={0x3A}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#88",		.cnt=1, .b={0x3B}, .width= 4, .ifp=IFP_F},
+	{.str="S^#88",		.cnt=1, .b={0x3B}, .width= 8, .ifp=IFP_D},
+	{.str="S^#88",		.cnt=1, .b={0x3B}, .width= 8, .ifp=IFP_G},
+	{.str="S^#88",		.cnt=1, .b={0x3B}, .width=16, .ifp=IFP_H},
+
+	/* 111.100 */
+	{.str="S^#96",		.cnt=1, .b={0x3C}, .width= 4, .ifp=IFP_F},
+	{.str="S^#96",		.cnt=1, .b={0x3C}, .width= 8, .ifp=IFP_D},
+	{.str="S^#96",		.cnt=1, .b={0x3C}, .width= 8, .ifp=IFP_G},
+	{.str="S^#96",		.cnt=1, .b={0x3C}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#104",		.cnt=1, .b={0x3D}, .width= 4, .ifp=IFP_F},
+	{.str="S^#104",		.cnt=1, .b={0x3D}, .width= 8, .ifp=IFP_D},
+	{.str="S^#104",		.cnt=1, .b={0x3D}, .width= 8, .ifp=IFP_G},
+	{.str="S^#104",		.cnt=1, .b={0x3D}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#112",		.cnt=1, .b={0x3E}, .width= 4, .ifp=IFP_F},
+	{.str="S^#112",		.cnt=1, .b={0x3E}, .width= 8, .ifp=IFP_D},
+	{.str="S^#112",		.cnt=1, .b={0x3E}, .width= 8, .ifp=IFP_G},
+	{.str="S^#112",		.cnt=1, .b={0x3E}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#120",		.cnt=1, .b={0x3F}, .width= 4, .ifp=IFP_F},
+	{.str="S^#120",		.cnt=1, .b={0x3F}, .width= 8, .ifp=IFP_D},
+	{.str="S^#120",		.cnt=1, .b={0x3F}, .width= 8, .ifp=IFP_G},
+	{.str="S^#120",		.cnt=1, .b={0x3F}, .width=16, .ifp=IFP_H},
+
+
+	/* big immediates, integers */
+
+	{.str="I^#0x00",	.cnt=2, .b={0x8F, 0x00},	.width=1, .ifp=IFP_INT},
+	{.str="I^#0x6A",	.cnt=2, .b={0x8F, 0x6A},	.width=1, .ifp=IFP_INT},
+	{.str="I^#0xFF",	.cnt=2, .b={0x8F, 0xFF},	.width=1, .ifp=IFP_INT},
+
+	{.str="I^#0x0000",	.cnt=3, .b={0x8F, 0x00,0x00},	.width=2, .ifp=IFP_INT},
+	{.str="I^#0x00FF",	.cnt=3, .b={0x8F, 0xFF,0x00},	.width=2, .ifp=IFP_INT},
+	{.str="I^#0x126A",	.cnt=3, .b={0x8F, 0x6A,0x12},	.width=2, .ifp=IFP_INT},
+	{.str="I^#0xFFFF",	.cnt=3, .b={0x8F, 0xFF,0xFF},	.width=2, .ifp=IFP_INT},
+
+	{.str="I^#0x0000_0000",	.cnt=5, .b={0x8F, 0x00,0x00,0x00,0x00},	.width=4, .ifp=IFP_INT},
+	{.str="I^#0x0000_00FF",	.cnt=5, .b={0x8F, 0xFF,0x00,0x00,0x00},	.width=4, .ifp=IFP_INT},
+	{.str="I^#0x1234_5678",	.cnt=5, .b={0x8F, 0x78,0x56,0x34,0x12},	.width=4, .ifp=IFP_INT},
+	{.str="I^#0xFFFF_FFFF",	.cnt=5, .b={0x8F, 0xFF,0xFF,0xFF,0xFF},	.width=4, .ifp=IFP_INT},
+
+	{.str="I^#0x0000_0000_0000_0000",
+				.cnt=9, .b={0x8F, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00}, .width=8, .ifp=IFP_INT},
+	{.str="I^#0x0000_0000_0000_00FF",
+				.cnt=9, .b={0x8F, 0xFF,0x00,0x00,0x00, 0x00,0x00,0x00,0x00}, .width=8, .ifp=IFP_INT},
+	{.str="I^#0x1234_5678_9ABC_DEF0",
+				.cnt=9, .b={0x8F, 0xF0,0xDE,0xBC,0x9A, 0x78,0x56,0x34,0x12}, .width=8, .ifp=IFP_INT},
+	{.str="I^#0xFFFF_FFFF_FFFF_FFFF",
+				.cnt=9, .b={0x8F, 0xFF,0xFF,0xFF,0xFF, 0xFF,0xFF,0xFF,0xFF},.width=8, .ifp=IFP_INT},
+
+	{.str="I^#0x0000_0000_0000_0000__0000_0000_0000_0000",
+				.cnt=17, .b={0x8F, 0x00,0x00,0x00,0x00,
+	                                           0x00,0x00,0x00,0x00,
+	                                           0x00,0x00,0x00,0x00,
+	                                           0x00,0x00,0x00,0x00},.width=16, .ifp=IFP_INT},
+	{.str="I^#0x0000_0000_0000_0000__0000_0000_0000_00FF",
+				.cnt=17, .b={0x8F, 0xFF,0x00,0x00,0x00,
+	                                           0x00,0x00,0x00,0x00,
+	                                           0x00,0x00,0x00,0x00,
+	                                           0x00,0x00,0x00,0x00},.width=16, .ifp=IFP_INT},
+	{.str="I^#0xFEDC_BA98_7654_3210__0123_4567_89AB_CDEF",
+				.cnt=17, .b={0x8F, 0xEF,0xCD,0xAB,0x89,
+	                                           0x67,0x45,0x23,0x01,
+	                                           0x10,0x32,0x54,0x76,
+	                                           0x98,0xBA,0xDC,0xFE},.width=16, .ifp=IFP_INT},
+	{.str="I^#0xFFFF_FFFF_FFFF_FFFF__FFFF_FFFF_FFFF_FFFF",
+				.cnt=17, .b={0x8F, 0xFF,0xFF,0xFF,0xFF,
+				                   0xFF,0xFF,0xFF,0xFF,
+				                   0xFF,0xFF,0xFF,0xFF,
+				                   0xFF,0xFF,0xFF,0xFF},.width=16, .ifp=IFP_INT},
+
+	/* big immediates, fp values */
+
+	{.str="I^#0",		.cnt=5, .b={0x8F, 0x00,0x00,0x00,0x00}, .width= 4, .ifp=IFP_F},
+	{.str="I^#1",		.cnt=5, .b={0x8F, 0x80,0x40,0x00,0x00}, .width= 4, .ifp=IFP_F},
+	{.str="I^#1.1",		.cnt=5, .b={0x8F, 0x8C,0x40,0xCD,0xCC}, .width= 4, .ifp=IFP_F},
+	{.str="I^#1.1415",	.cnt=5, .b={0x8F, 0x92,0x40,0xAC,0x1C}, .width= 4, .ifp=IFP_F},
+	{.str="I^#123.1",	.cnt=5, .b={0x8F, 0xF6,0x43,0x33,0x33}, .width= 4, .ifp=IFP_F},
+	{.str="I^#-123.1",	.cnt=5, .b={0x8F, 0xF6,0xC3,0x33,0x33}, .width= 4, .ifp=IFP_F},
+	{.str="I^#123100",	.cnt=5, .b={0x8F, 0xF0,0x48,0x00,0x6E}, .width= 4, .ifp=IFP_F},
+	{.str="I^#0.1231",	.cnt=5, .b={0x8F, 0xFC,0x3E,0xDA,0x1B}, .width= 4, .ifp=IFP_F},
+	{.str="I^#1.231E14",	.cnt=5, .b={0x8F, 0xDF,0x57,0xE8,0xEA}, .width= 4, .ifp=IFP_F},
+	{.str="I^#1.231E-10",	.cnt=5, .b={0x8F, 0x07,0x30,0x92,0x59}, .width= 4, .ifp=IFP_F},
+
+	{.str="I^#1.231E-10",	.cnt=9, .b={0x8F, 0x07,0x30,0x91,0x59, 0x79,0xD3,0xDA,0x40}, .width= 8, .ifp=IFP_D},
+	{.str="I^#1.231E-10",	.cnt=9, .b={0x8F, 0x00,0x3E,0x32,0xEB, 0x6F,0x3A,0x1B,0x28}, .width= 8, .ifp=IFP_G},
+	{.str="I^#1.231E-121",	.cnt=17,.b={0x8F, 0x6F,0x3E,0x81,0x45,
+	                                          0x75,0x03,0x54,0x8A,
+	                                          0x39,0xD5,0x0A,0x5C,
+	                                          0xD7,0x79,0x8F,0xDE}, .width=16, .ifp=IFP_H},
+
+	/***/
+
+
+	{.str="r0",		.cnt=1, .b={0x50}, .width=1, .ifp=IFP_INT},
+	{.str="r4",		.cnt=1, .b={0x54}, .width=1, .ifp=IFP_INT},
+	{.str="fp",		.cnt=1, .b={0x5D}, .width=1, .ifp=IFP_INT},
+	{.str="sp",		.cnt=1, .b={0x5F}, .width=1, .ifp=IFP_INT},
+
+	{.str="(r0)",		.cnt=1, .b={0x60}, .width=1, .ifp=IFP_INT},
+	{.str="(fp)",		.cnt=1, .b={0x6D}, .width=1, .ifp=IFP_INT},
+	{.str="(pc)",		.cnt=1, .b={0x6F}, .width=1, .ifp=IFP_INT},
+
+	{.str="-(r0)",		.cnt=1, .b={0x70}, .width=1, .ifp=IFP_INT},
+	{.str="-(fp)",		.cnt=1, .b={0x7D}, .width=1, .ifp=IFP_INT},
+	{.str="-(pc)",		.cnt=1, .b={0x7F}, .width=1, .ifp=IFP_INT},
+
+	{.str="(r2)+",		.cnt=1, .b={0x82}, .width=1, .ifp=IFP_INT},
+	{.str="(ap)+",		.cnt=1, .b={0x8C}, .width=1, .ifp=IFP_INT},
+
+	{.str="@#0x1234_5678",	.cnt=5, .b={0x9F, 0x78,0x56,0x34,0x12}, .width=1, .ifp=IFP_INT},
+
+	{.str="@(r0)+",		.cnt=1, .b={0x90}, .width=1, .ifp=IFP_INT},
+	{.str="@(fp)+",		.cnt=1, .b={0x9D}, .width=1, .ifp=IFP_INT},
+
+	/* pcrel/disp */
+	{.str="B^0xCAFE_BB00",	.cnt=2, .b={0xAF, 0x42}, .width=1, .ifp=IFP_INT},
+	{.str="B^100(fp)",	.cnt=2, .b={0xAD, 0x64}, .width=1, .ifp=IFP_INT},
+	{.str="@B^0xCAFE_BB00",	.cnt=2, .b={0xBF, 0x42}, .width=1, .ifp=IFP_INT},
+	{.str="@B^100(fp)",	.cnt=2, .b={0xBD, 0x64}, .width=1, .ifp=IFP_INT},
+
+	{.str="W^0xCAFE_C000",	.cnt=3, .b={0xCF, 0x42,0x05}, .width=1, .ifp=IFP_INT},
+	{.str="W^1000(fp)",	.cnt=3, .b={0xCD, 0xE8,0x03}, .width=1, .ifp=IFP_INT},
+	{.str="@W^0xCAFE_C000",	.cnt=3, .b={0xDF, 0x42,0x05}, .width=1, .ifp=IFP_INT},
+	{.str="@W^1000(fp)",	.cnt=3, .b={0xDD, 0xE8,0x03}, .width=1, .ifp=IFP_INT},
+
+	{.str="L^0xCC00_C000",	.cnt=5, .b={0xEF, 0x42,0x05,0x02,0x01}, .width=1, .ifp=IFP_INT},
+	{.str="L^100000(fp)",	.cnt=5, .b={0xED, 0xA0,0x86,0x01,0x00}, .width=1, .ifp=IFP_INT},
+	{.str="@L^0xCC00_C000",	.cnt=5, .b={0xFF, 0x42,0x05,0x02,0x01}, .width=1, .ifp=IFP_INT},
+	{.str="@L^100000(fp)",	.cnt=5, .b={0xFD, 0xA0,0x86,0x01,0x00}, .width=1, .ifp=IFP_INT},
+
+
+	/* indexed operands (some of he combinations here are illegal) */
+	{.str="(r2)[fp]",		.cnt=2, .b={0x4D,0x62}, .width=1, .ifp=IFP_INT},
+	{.str="(pc)[fp]",		.cnt=2, .b={0x4D,0x6F}, .width=1, .ifp=IFP_INT},
+	{.str="(r2)[pc]",		.cnt=2, .b={0x4F,0x62}, .width=1, .ifp=IFP_INT},
+	{.str="-(r2)[fp]",		.cnt=2, .b={0x4D,0x72}, .width=1, .ifp=IFP_INT},
+	{.str="(r2)+[fp]",		.cnt=2, .b={0x4D,0x82}, .width=1, .ifp=IFP_INT},
+	{.str="@#0x1234_5678[fp]",	.cnt=6, .b={0x4D,0x9F, 0x78,0x56,0x34,0x12}, .width=1, .ifp=IFP_INT},
+	{.str="@(r2)+[fp]",		.cnt=2, .b={0x4D,0x92}, .width=1, .ifp=IFP_INT},
+
+
+	{.str="B^0xCAFE_BB00[fp]",	.cnt=3, .b={0x4D,0xAF, 0x42}, .width=1, .ifp=IFP_INT},
+	{.str="B^100(r2)[fp]",		.cnt=3, .b={0x4D,0xA2, 0x64}, .width=1, .ifp=IFP_INT},
+	{.str="@B^^XCAFE_BB00[fp]",	.cnt=3, .b={0x4D,0xBF, 0x42}, .width=1, .ifp=IFP_INT},
+	{.str="@B^100(r2)[fp]",		.cnt=3, .b={0x4D,0xB2, 0x64}, .width=1, .ifp=IFP_INT},
+
+	{.str="W^0xCAFE_C000[fp]",	.cnt=4, .b={0x4D,0xCF, 0x42,0x05}, .width=1, .ifp=IFP_INT},
+	{.str="W^1000(r2)[fp]",		.cnt=4, .b={0x4D,0xC2, 0xE8,0x03}, .width=1, .ifp=IFP_INT},
+	{.str="@W^0xCAFE_C000[fp]",	.cnt=4, .b={0x4D,0xDF, 0x42,0x05}, .width=1, .ifp=IFP_INT},
+	{.str="@W^1000(r2)[fp]",	.cnt=4, .b={0x4D,0xD2, 0xE8,0x03}, .width=1, .ifp=IFP_INT},
+
+	{.str="L^0xCC00_C000[fp]",	.cnt=6, .b={0x4D,0xEF, 0x42,0x05,0x02,0x01}, .width=1, .ifp=IFP_INT},
+	{.str="L^100000(r2)[fp]",	.cnt=6, .b={0x4D,0xE2, 0xA0,0x86,0x01,0x00}, .width=1, .ifp=IFP_INT},
+	{.str="@L^0xCC00_C000[fp]",	.cnt=6, .b={0x4D,0xFF, 0x42,0x05,0x02,0x01}, .width=1, .ifp=IFP_INT},
+	{.str="@L^100000(r2)[fp]",	.cnt=6, .b={0x4D,0xF2, 0xA0,0x86,0x01,0x00}, .width=1, .ifp=IFP_INT},
+
 };
 
 /***/
 
-
-#if 1
-void test_asm()
+void dis_run(struct test_dis_case test)
 {
-	const char	*cases[] = {
-	"r0", "fp", "[r6]", "[r2++]", "[--r7]",
-	"r0", "fp", "(r6)", "(r2+)", "(-r7)",
-	};
-
-	uint8_t	b[MAX_OPLEN];
-	int	bytes;
-
-	parse_init(cases[0]);
-	bytes = op_asm_sane(b, 1, IFP_INT);
-	printf("bytes: %d\n", bytes);
-	for (int i=0; i < bytes; i++) {
-		printf("%02X ", b[i]);
-	}
-	printf("\n");
-	parse_done();
-}
-#else
-void test_asm()
-{
-}
-#endif
-
-
-#if 1
-void dis_run(struct testcase test)
-{
-	char	buf[100];
-	memset(buf, 0xFF, sizeof(buf));
-
-	struct dis_ret dis_ret = op_dis_sane(test.b, test.width, test.ifp);
+	struct dis_ret dis_ret = op_dis_vax(test.b, 0xCAFEBABE, test.width, test.ifp);
 
 	for (int i=0; i < (int) sizeof(test.b); i++) {
 		if (i < test.cnt)
@@ -542,7 +1906,7 @@ void dis_run(struct testcase test)
 	case IFP_G:	printf("g "); break;
 	case IFP_H:	printf("h "); break;
 	default:
-		assert(0);
+		UNREACHABLE();
 	}
 
 	if (dis_ret.cnt == -1)
@@ -556,7 +1920,7 @@ void dis_run(struct testcase test)
 
 	printf(" ");
 	if (dis_ret.cnt != -1) {
-		printf("%s", buf);
+		printf("%s", dis_ret.str);
 	} else {
 		printf("-");
 	}
@@ -568,23 +1932,506 @@ void test_dis()
 {
 	printf("Disassembly\n");
 	printf("-----------\n");
-	for (unsigned i=0; i < ARRAY_SIZE(tests); i++)
-		dis_run(tests[i]);
+	for (unsigned i=0; i < ARRAY_SIZE(dis_vax); i++)
+		dis_run(dis_vax[i]);
 
 	printf("\n");
 }
-#else
-void test_dis()
-{
-}
-#endif
+
+/***/
+
+struct test_sim_case {
+	int	cnt;
+	uint8_t	b[MAX_OPLEN];
+	int	width;
+	enum ifp ifp;
+	char	*str;
+};
 
 
-#if 1
-void sim_run(struct testcase test)
+struct test_sim_case sim_vax[] = {
+	/* lit6, integers */
+	{.cnt=1, .b={0x00}, .width=1, .ifp=IFP_INT, .str="S^#0x00"},
+	{.cnt=1, .b={0x01}, .width=1, .ifp=IFP_INT, .str="S^#0x01"},
+	{.cnt=1, .b={0x3F}, .width=1, .ifp=IFP_INT, .str="S^#0x3F"},
+
+	/* lit6, floats */
+	/* 000.000 */
+	{.str="S^#0.5",		.cnt=1, .b={0x00}, .width= 4, .ifp=IFP_F},
+	{.str="S^#0.5",		.cnt=1, .b={0x00}, .width= 8, .ifp=IFP_D},
+	{.str="S^#0.5",		.cnt=1, .b={0x00}, .width= 8, .ifp=IFP_G},
+	{.str="S^#0.5",		.cnt=1, .b={0x00}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#0.5625",	.cnt=1, .b={0x01}, .width= 4, .ifp=IFP_F},
+	{.str="S^#0.5625",	.cnt=1, .b={0x01}, .width= 8, .ifp=IFP_D},
+	{.str="S^#0.5625",	.cnt=1, .b={0x01}, .width= 8, .ifp=IFP_G},
+	{.str="S^#0.5625",	.cnt=1, .b={0x01}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#0.625",	.cnt=1, .b={0x02}, .width= 4, .ifp=IFP_F},
+	{.str="S^#0.625",	.cnt=1, .b={0x02}, .width= 8, .ifp=IFP_D},
+	{.str="S^#0.625",	.cnt=1, .b={0x02}, .width= 8, .ifp=IFP_G},
+	{.str="S^#0.625",	.cnt=1, .b={0x02}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#0.6875",	.cnt=1, .b={0x03}, .width= 4, .ifp=IFP_F},
+	{.str="S^#0.6875",	.cnt=1, .b={0x03}, .width= 8, .ifp=IFP_D},
+	{.str="S^#0.6875",	.cnt=1, .b={0x03}, .width= 8, .ifp=IFP_G},
+	{.str="S^#0.6875",	.cnt=1, .b={0x03}, .width=16, .ifp=IFP_H},
+
+	/* 000.100 */
+	{.str="S^#0.75",	.cnt=1, .b={0x04}, .width= 4, .ifp=IFP_F},
+	{.str="S^#0.75",	.cnt=1, .b={0x04}, .width= 8, .ifp=IFP_D},
+	{.str="S^#0.75",	.cnt=1, .b={0x04}, .width= 8, .ifp=IFP_G},
+	{.str="S^#0.75",	.cnt=1, .b={0x04}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#0.8125",	.cnt=1, .b={0x05}, .width= 4, .ifp=IFP_F},
+	{.str="S^#0.8125",	.cnt=1, .b={0x05}, .width= 8, .ifp=IFP_D},
+	{.str="S^#0.8125",	.cnt=1, .b={0x05}, .width= 8, .ifp=IFP_G},
+	{.str="S^#0.8125",	.cnt=1, .b={0x05}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#0.875",	.cnt=1, .b={0x06}, .width= 4, .ifp=IFP_F},
+	{.str="S^#0.875",	.cnt=1, .b={0x06}, .width= 8, .ifp=IFP_D},
+	{.str="S^#0.875",	.cnt=1, .b={0x06}, .width= 8, .ifp=IFP_G},
+	{.str="S^#0.875",	.cnt=1, .b={0x06}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#0.9375",	.cnt=1, .b={0x07}, .width= 4, .ifp=IFP_F},
+	{.str="S^#0.9375",	.cnt=1, .b={0x07}, .width= 8, .ifp=IFP_D},
+	{.str="S^#0.9375",	.cnt=1, .b={0x07}, .width= 8, .ifp=IFP_G},
+	{.str="S^#0.9375",	.cnt=1, .b={0x07}, .width=16, .ifp=IFP_H},
+
+	/* 001.000 */
+	{.str="S^#1",		.cnt=1, .b={0x08}, .width= 4, .ifp=IFP_F},
+	{.str="S^#1",		.cnt=1, .b={0x08}, .width= 8, .ifp=IFP_D},
+	{.str="S^#1",		.cnt=1, .b={0x08}, .width= 8, .ifp=IFP_G},
+	{.str="S^#1",		.cnt=1, .b={0x08}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#1.125",	.cnt=1, .b={0x09}, .width= 4, .ifp=IFP_F},
+	{.str="S^#1.125",	.cnt=1, .b={0x09}, .width= 8, .ifp=IFP_D},
+	{.str="S^#1.125",	.cnt=1, .b={0x09}, .width= 8, .ifp=IFP_G},
+	{.str="S^#1.125",	.cnt=1, .b={0x09}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#1.25",	.cnt=1, .b={0x0A}, .width= 4, .ifp=IFP_F},
+	{.str="S^#1.25",	.cnt=1, .b={0x0A}, .width= 8, .ifp=IFP_D},
+	{.str="S^#1.25",	.cnt=1, .b={0x0A}, .width= 8, .ifp=IFP_G},
+	{.str="S^#1.25",	.cnt=1, .b={0x0A}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#1.375",	.cnt=1, .b={0x0B}, .width= 4, .ifp=IFP_F},
+	{.str="S^#1.375",	.cnt=1, .b={0x0B}, .width= 8, .ifp=IFP_D},
+	{.str="S^#1.375",	.cnt=1, .b={0x0B}, .width= 8, .ifp=IFP_G},
+	{.str="S^#1.375",	.cnt=1, .b={0x0B}, .width=16, .ifp=IFP_H},
+
+	/* 001.100 */
+	{.str="S^#1.5",		.cnt=1, .b={0x0C}, .width= 4, .ifp=IFP_F},
+	{.str="S^#1.5",		.cnt=1, .b={0x0C}, .width= 8, .ifp=IFP_D},
+	{.str="S^#1.5",		.cnt=1, .b={0x0C}, .width= 8, .ifp=IFP_G},
+	{.str="S^#1.5",		.cnt=1, .b={0x0C}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#1.625",	.cnt=1, .b={0x0D}, .width= 4, .ifp=IFP_F},
+	{.str="S^#1.625",	.cnt=1, .b={0x0D}, .width= 8, .ifp=IFP_D},
+	{.str="S^#1.625",	.cnt=1, .b={0x0D}, .width= 8, .ifp=IFP_G},
+	{.str="S^#1.625",	.cnt=1, .b={0x0D}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#1.75",	.cnt=1, .b={0x0E}, .width= 4, .ifp=IFP_F},
+	{.str="S^#1.75",	.cnt=1, .b={0x0E}, .width= 8, .ifp=IFP_D},
+	{.str="S^#1.75",	.cnt=1, .b={0x0E}, .width= 8, .ifp=IFP_G},
+	{.str="S^#1.75",	.cnt=1, .b={0x0E}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#1.875",	.cnt=1, .b={0x0F}, .width= 4, .ifp=IFP_F},
+	{.str="S^#1.875",	.cnt=1, .b={0x0F}, .width= 8, .ifp=IFP_D},
+	{.str="S^#1.875",	.cnt=1, .b={0x0F}, .width= 8, .ifp=IFP_G},
+	{.str="S^#1.875",	.cnt=1, .b={0x0F}, .width=16, .ifp=IFP_H},
+
+	/* 010.000 */
+	{.str="S^#2",		.cnt=1, .b={0x10}, .width= 4, .ifp=IFP_F},
+	{.str="S^#2",		.cnt=1, .b={0x10}, .width= 8, .ifp=IFP_D},
+	{.str="S^#2",		.cnt=1, .b={0x10}, .width= 8, .ifp=IFP_G},
+	{.str="S^#2",		.cnt=1, .b={0x10}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#2.25",	.cnt=1, .b={0x11}, .width= 4, .ifp=IFP_F},
+	{.str="S^#2.25",	.cnt=1, .b={0x11}, .width= 8, .ifp=IFP_D},
+	{.str="S^#2.25",	.cnt=1, .b={0x11}, .width= 8, .ifp=IFP_G},
+	{.str="S^#2.25",	.cnt=1, .b={0x11}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#2.5",		.cnt=1, .b={0x12}, .width= 4, .ifp=IFP_F},
+	{.str="S^#2.5",		.cnt=1, .b={0x12}, .width= 8, .ifp=IFP_D},
+	{.str="S^#2.5",		.cnt=1, .b={0x12}, .width= 8, .ifp=IFP_G},
+	{.str="S^#2.5",		.cnt=1, .b={0x12}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#2.75",	.cnt=1, .b={0x13}, .width= 4, .ifp=IFP_F},
+	{.str="S^#2.75",	.cnt=1, .b={0x13}, .width= 8, .ifp=IFP_D},
+	{.str="S^#2.75",	.cnt=1, .b={0x13}, .width= 8, .ifp=IFP_G},
+	{.str="S^#2.75",	.cnt=1, .b={0x13}, .width=16, .ifp=IFP_H},
+
+	/* 010.100 */
+	{.str="S^#3",		.cnt=1, .b={0x14}, .width= 4, .ifp=IFP_F},
+	{.str="S^#3",		.cnt=1, .b={0x14}, .width= 8, .ifp=IFP_D},
+	{.str="S^#3",		.cnt=1, .b={0x14}, .width= 8, .ifp=IFP_G},
+	{.str="S^#3",		.cnt=1, .b={0x14}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#3.25",	.cnt=1, .b={0x15}, .width= 4, .ifp=IFP_F},
+	{.str="S^#3.25",	.cnt=1, .b={0x15}, .width= 8, .ifp=IFP_D},
+	{.str="S^#3.25",	.cnt=1, .b={0x15}, .width= 8, .ifp=IFP_G},
+	{.str="S^#3.25",	.cnt=1, .b={0x15}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#3.5",		.cnt=1, .b={0x16}, .width= 4, .ifp=IFP_F},
+	{.str="S^#3.5",		.cnt=1, .b={0x16}, .width= 8, .ifp=IFP_D},
+	{.str="S^#3.5",		.cnt=1, .b={0x16}, .width= 8, .ifp=IFP_G},
+	{.str="S^#3.5",		.cnt=1, .b={0x16}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#3.75",	.cnt=1, .b={0x17}, .width= 4, .ifp=IFP_F},
+	{.str="S^#3.75",	.cnt=1, .b={0x17}, .width= 8, .ifp=IFP_D},
+	{.str="S^#3.75",	.cnt=1, .b={0x17}, .width= 8, .ifp=IFP_G},
+	{.str="S^#3.75",	.cnt=1, .b={0x17}, .width=16, .ifp=IFP_H},
+
+	/* 011.000 */
+	{.str="S^#4",		.cnt=1, .b={0x18}, .width= 4, .ifp=IFP_F},
+	{.str="S^#4",		.cnt=1, .b={0x18}, .width= 8, .ifp=IFP_D},
+	{.str="S^#4",		.cnt=1, .b={0x18}, .width= 8, .ifp=IFP_G},
+	{.str="S^#4",		.cnt=1, .b={0x18}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#4.5",		.cnt=1, .b={0x19}, .width= 4, .ifp=IFP_F},
+	{.str="S^#4.5",		.cnt=1, .b={0x19}, .width= 8, .ifp=IFP_D},
+	{.str="S^#4.5",		.cnt=1, .b={0x19}, .width= 8, .ifp=IFP_G},
+	{.str="S^#4.5",		.cnt=1, .b={0x19}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#5",		.cnt=1, .b={0x1A}, .width= 4, .ifp=IFP_F},
+	{.str="S^#5",		.cnt=1, .b={0x1A}, .width= 8, .ifp=IFP_D},
+	{.str="S^#5",		.cnt=1, .b={0x1A}, .width= 8, .ifp=IFP_G},
+	{.str="S^#5",		.cnt=1, .b={0x1A}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#5.5",		.cnt=1, .b={0x1B}, .width= 4, .ifp=IFP_F},
+	{.str="S^#5.5",		.cnt=1, .b={0x1B}, .width= 8, .ifp=IFP_D},
+	{.str="S^#5.5",		.cnt=1, .b={0x1B}, .width= 8, .ifp=IFP_G},
+	{.str="S^#5.5",		.cnt=1, .b={0x1B}, .width=16, .ifp=IFP_H},
+
+	/* 011.100 */
+	{.str="S^#6",		.cnt=1, .b={0x1C}, .width= 4, .ifp=IFP_F},
+	{.str="S^#6",		.cnt=1, .b={0x1C}, .width= 8, .ifp=IFP_D},
+	{.str="S^#6",		.cnt=1, .b={0x1C}, .width= 8, .ifp=IFP_G},
+	{.str="S^#6",		.cnt=1, .b={0x1C}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#6.5",		.cnt=1, .b={0x1D}, .width= 4, .ifp=IFP_F},
+	{.str="S^#6.5",		.cnt=1, .b={0x1D}, .width= 8, .ifp=IFP_D},
+	{.str="S^#6.5",		.cnt=1, .b={0x1D}, .width= 8, .ifp=IFP_G},
+	{.str="S^#6.5",		.cnt=1, .b={0x1D}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#7",		.cnt=1, .b={0x1E}, .width= 4, .ifp=IFP_F},
+	{.str="S^#7",		.cnt=1, .b={0x1E}, .width= 8, .ifp=IFP_D},
+	{.str="S^#7",		.cnt=1, .b={0x1E}, .width= 8, .ifp=IFP_G},
+	{.str="S^#7",		.cnt=1, .b={0x1E}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#7.5",		.cnt=1, .b={0x1F}, .width= 4, .ifp=IFP_F},
+	{.str="S^#7.5",		.cnt=1, .b={0x1F}, .width= 8, .ifp=IFP_D},
+	{.str="S^#7.5",		.cnt=1, .b={0x1F}, .width= 8, .ifp=IFP_G},
+	{.str="S^#7.5",		.cnt=1, .b={0x1F}, .width=16, .ifp=IFP_H},
+
+	/* 100.000 */
+	{.str="S^#8",		.cnt=1, .b={0x20}, .width= 4, .ifp=IFP_F},
+	{.str="S^#8",		.cnt=1, .b={0x20}, .width= 8, .ifp=IFP_D},
+	{.str="S^#8",		.cnt=1, .b={0x20}, .width= 8, .ifp=IFP_G},
+	{.str="S^#8",		.cnt=1, .b={0x20}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#9",		.cnt=1, .b={0x21}, .width= 4, .ifp=IFP_F},
+	{.str="S^#9",		.cnt=1, .b={0x21}, .width= 8, .ifp=IFP_D},
+	{.str="S^#9",		.cnt=1, .b={0x21}, .width= 8, .ifp=IFP_G},
+	{.str="S^#9",		.cnt=1, .b={0x21}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#10",		.cnt=1, .b={0x22}, .width= 4, .ifp=IFP_F},
+	{.str="S^#10",		.cnt=1, .b={0x22}, .width= 8, .ifp=IFP_D},
+	{.str="S^#10",		.cnt=1, .b={0x22}, .width= 8, .ifp=IFP_G},
+	{.str="S^#10",		.cnt=1, .b={0x22}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#11",		.cnt=1, .b={0x23}, .width= 4, .ifp=IFP_F},
+	{.str="S^#11",		.cnt=1, .b={0x23}, .width= 8, .ifp=IFP_D},
+	{.str="S^#11",		.cnt=1, .b={0x23}, .width= 8, .ifp=IFP_G},
+	{.str="S^#11",		.cnt=1, .b={0x23}, .width=16, .ifp=IFP_H},
+
+	/* 100.100 */
+	{.str="S^#12",		.cnt=1, .b={0x24}, .width= 4, .ifp=IFP_F},
+	{.str="S^#12",		.cnt=1, .b={0x24}, .width= 8, .ifp=IFP_D},
+	{.str="S^#12",		.cnt=1, .b={0x24}, .width= 8, .ifp=IFP_G},
+	{.str="S^#12",		.cnt=1, .b={0x24}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#13",		.cnt=1, .b={0x25}, .width= 4, .ifp=IFP_F},
+	{.str="S^#13",		.cnt=1, .b={0x25}, .width= 8, .ifp=IFP_D},
+	{.str="S^#13",		.cnt=1, .b={0x25}, .width= 8, .ifp=IFP_G},
+	{.str="S^#13",		.cnt=1, .b={0x25}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#14",		.cnt=1, .b={0x26}, .width= 4, .ifp=IFP_F},
+	{.str="S^#14",		.cnt=1, .b={0x26}, .width= 8, .ifp=IFP_D},
+	{.str="S^#14",		.cnt=1, .b={0x26}, .width= 8, .ifp=IFP_G},
+	{.str="S^#14",		.cnt=1, .b={0x26}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#15",		.cnt=1, .b={0x27}, .width= 4, .ifp=IFP_F},
+	{.str="S^#15",		.cnt=1, .b={0x27}, .width= 8, .ifp=IFP_D},
+	{.str="S^#15",		.cnt=1, .b={0x27}, .width= 8, .ifp=IFP_G},
+	{.str="S^#15",		.cnt=1, .b={0x27}, .width=16, .ifp=IFP_H},
+
+	/* 101.000 */
+	{.str="S^#16",		.cnt=1, .b={0x28}, .width= 4, .ifp=IFP_F},
+	{.str="S^#16",		.cnt=1, .b={0x28}, .width= 8, .ifp=IFP_D},
+	{.str="S^#16",		.cnt=1, .b={0x28}, .width= 8, .ifp=IFP_G},
+	{.str="S^#16",		.cnt=1, .b={0x28}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#18",		.cnt=1, .b={0x29}, .width= 4, .ifp=IFP_F},
+	{.str="S^#18",		.cnt=1, .b={0x29}, .width= 8, .ifp=IFP_D},
+	{.str="S^#18",		.cnt=1, .b={0x29}, .width= 8, .ifp=IFP_G},
+	{.str="S^#18",		.cnt=1, .b={0x29}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#20",		.cnt=1, .b={0x2A}, .width= 4, .ifp=IFP_F},
+	{.str="S^#20",		.cnt=1, .b={0x2A}, .width= 8, .ifp=IFP_D},
+	{.str="S^#20",		.cnt=1, .b={0x2A}, .width= 8, .ifp=IFP_G},
+	{.str="S^#20",		.cnt=1, .b={0x2A}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#22",		.cnt=1, .b={0x2B}, .width= 4, .ifp=IFP_F},
+	{.str="S^#22",		.cnt=1, .b={0x2B}, .width= 8, .ifp=IFP_D},
+	{.str="S^#22",		.cnt=1, .b={0x2B}, .width= 8, .ifp=IFP_G},
+	{.str="S^#22",		.cnt=1, .b={0x2B}, .width=16, .ifp=IFP_H},
+
+	/* 101.100 */
+	{.str="S^#24",		.cnt=1, .b={0x2C}, .width= 4, .ifp=IFP_F},
+	{.str="S^#24",		.cnt=1, .b={0x2C}, .width= 8, .ifp=IFP_D},
+	{.str="S^#24",		.cnt=1, .b={0x2C}, .width= 8, .ifp=IFP_G},
+	{.str="S^#24",		.cnt=1, .b={0x2C}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#26",		.cnt=1, .b={0x2D}, .width= 4, .ifp=IFP_F},
+	{.str="S^#26",		.cnt=1, .b={0x2D}, .width= 8, .ifp=IFP_D},
+	{.str="S^#26",		.cnt=1, .b={0x2D}, .width= 8, .ifp=IFP_G},
+	{.str="S^#26",		.cnt=1, .b={0x2D}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#28",		.cnt=1, .b={0x2E}, .width= 4, .ifp=IFP_F},
+	{.str="S^#28",		.cnt=1, .b={0x2E}, .width= 8, .ifp=IFP_D},
+	{.str="S^#28",		.cnt=1, .b={0x2E}, .width= 8, .ifp=IFP_G},
+	{.str="S^#28",		.cnt=1, .b={0x2E}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#30",		.cnt=1, .b={0x2F}, .width= 4, .ifp=IFP_F},
+	{.str="S^#30",		.cnt=1, .b={0x2F}, .width= 8, .ifp=IFP_D},
+	{.str="S^#30",		.cnt=1, .b={0x2F}, .width= 8, .ifp=IFP_G},
+	{.str="S^#30",		.cnt=1, .b={0x2F}, .width=16, .ifp=IFP_H},
+
+	/* 110.000 */
+	{.str="S^#32",		.cnt=1, .b={0x30}, .width= 4, .ifp=IFP_F},
+	{.str="S^#32",		.cnt=1, .b={0x30}, .width= 8, .ifp=IFP_D},
+	{.str="S^#32",		.cnt=1, .b={0x30}, .width= 8, .ifp=IFP_G},
+	{.str="S^#32",		.cnt=1, .b={0x30}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#36",		.cnt=1, .b={0x31}, .width= 4, .ifp=IFP_F},
+	{.str="S^#36",		.cnt=1, .b={0x31}, .width= 8, .ifp=IFP_D},
+	{.str="S^#36",		.cnt=1, .b={0x31}, .width= 8, .ifp=IFP_G},
+	{.str="S^#36",		.cnt=1, .b={0x31}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#40",		.cnt=1, .b={0x32}, .width= 4, .ifp=IFP_F},
+	{.str="S^#40",		.cnt=1, .b={0x32}, .width= 8, .ifp=IFP_D},
+	{.str="S^#40",		.cnt=1, .b={0x32}, .width= 8, .ifp=IFP_G},
+	{.str="S^#40",		.cnt=1, .b={0x32}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#44",		.cnt=1, .b={0x33}, .width= 4, .ifp=IFP_F},
+	{.str="S^#44",		.cnt=1, .b={0x33}, .width= 8, .ifp=IFP_D},
+	{.str="S^#44",		.cnt=1, .b={0x33}, .width= 8, .ifp=IFP_G},
+	{.str="S^#44",		.cnt=1, .b={0x33}, .width=16, .ifp=IFP_H},
+
+	/* 110.100 */
+	{.str="S^#48",		.cnt=1, .b={0x34}, .width= 4, .ifp=IFP_F},
+	{.str="S^#48",		.cnt=1, .b={0x34}, .width= 8, .ifp=IFP_D},
+	{.str="S^#48",		.cnt=1, .b={0x34}, .width= 8, .ifp=IFP_G},
+	{.str="S^#48",		.cnt=1, .b={0x34}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#52",		.cnt=1, .b={0x35}, .width= 4, .ifp=IFP_F},
+	{.str="S^#52",		.cnt=1, .b={0x35}, .width= 8, .ifp=IFP_D},
+	{.str="S^#52",		.cnt=1, .b={0x35}, .width= 8, .ifp=IFP_G},
+	{.str="S^#52",		.cnt=1, .b={0x35}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#56",		.cnt=1, .b={0x36}, .width= 4, .ifp=IFP_F},
+	{.str="S^#56",		.cnt=1, .b={0x36}, .width= 8, .ifp=IFP_D},
+	{.str="S^#56",		.cnt=1, .b={0x36}, .width= 8, .ifp=IFP_G},
+	{.str="S^#56",		.cnt=1, .b={0x36}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#60",		.cnt=1, .b={0x37}, .width= 4, .ifp=IFP_F},
+	{.str="S^#60",		.cnt=1, .b={0x37}, .width= 8, .ifp=IFP_D},
+	{.str="S^#60",		.cnt=1, .b={0x37}, .width= 8, .ifp=IFP_G},
+	{.str="S^#60",		.cnt=1, .b={0x37}, .width=16, .ifp=IFP_H},
+
+	/* 111.000 */
+	{.str="S^#64",		.cnt=1, .b={0x38}, .width= 4, .ifp=IFP_F},
+	{.str="S^#64",		.cnt=1, .b={0x38}, .width= 8, .ifp=IFP_D},
+	{.str="S^#64",		.cnt=1, .b={0x38}, .width= 8, .ifp=IFP_G},
+	{.str="S^#64",		.cnt=1, .b={0x38}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#72",		.cnt=1, .b={0x39}, .width= 4, .ifp=IFP_F},
+	{.str="S^#72",		.cnt=1, .b={0x39}, .width= 8, .ifp=IFP_D},
+	{.str="S^#72",		.cnt=1, .b={0x39}, .width= 8, .ifp=IFP_G},
+	{.str="S^#72",		.cnt=1, .b={0x39}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#80",		.cnt=1, .b={0x3A}, .width= 4, .ifp=IFP_F},
+	{.str="S^#80",		.cnt=1, .b={0x3A}, .width= 8, .ifp=IFP_D},
+	{.str="S^#80",		.cnt=1, .b={0x3A}, .width= 8, .ifp=IFP_G},
+	{.str="S^#80",		.cnt=1, .b={0x3A}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#88",		.cnt=1, .b={0x3B}, .width= 4, .ifp=IFP_F},
+	{.str="S^#88",		.cnt=1, .b={0x3B}, .width= 8, .ifp=IFP_D},
+	{.str="S^#88",		.cnt=1, .b={0x3B}, .width= 8, .ifp=IFP_G},
+	{.str="S^#88",		.cnt=1, .b={0x3B}, .width=16, .ifp=IFP_H},
+
+	/* 111.100 */
+	{.str="S^#96",		.cnt=1, .b={0x3C}, .width= 4, .ifp=IFP_F},
+	{.str="S^#96",		.cnt=1, .b={0x3C}, .width= 8, .ifp=IFP_D},
+	{.str="S^#96",		.cnt=1, .b={0x3C}, .width= 8, .ifp=IFP_G},
+	{.str="S^#96",		.cnt=1, .b={0x3C}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#104",		.cnt=1, .b={0x3D}, .width= 4, .ifp=IFP_F},
+	{.str="S^#104",		.cnt=1, .b={0x3D}, .width= 8, .ifp=IFP_D},
+	{.str="S^#104",		.cnt=1, .b={0x3D}, .width= 8, .ifp=IFP_G},
+	{.str="S^#104",		.cnt=1, .b={0x3D}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#112",		.cnt=1, .b={0x3E}, .width= 4, .ifp=IFP_F},
+	{.str="S^#112",		.cnt=1, .b={0x3E}, .width= 8, .ifp=IFP_D},
+	{.str="S^#112",		.cnt=1, .b={0x3E}, .width= 8, .ifp=IFP_G},
+	{.str="S^#112",		.cnt=1, .b={0x3E}, .width=16, .ifp=IFP_H},
+
+	{.str="S^#120",		.cnt=1, .b={0x3F}, .width= 4, .ifp=IFP_F},
+	{.str="S^#120",		.cnt=1, .b={0x3F}, .width= 8, .ifp=IFP_D},
+	{.str="S^#120",		.cnt=1, .b={0x3F}, .width= 8, .ifp=IFP_G},
+	{.str="S^#120",		.cnt=1, .b={0x3F}, .width=16, .ifp=IFP_H},
+
+
+	/* big immediates, integers */
+
+	{.str="I^#0x00",	.cnt=2, .b={0x8F, 0x00},	.width=1, .ifp=IFP_INT},
+	{.str="I^#0x6A",	.cnt=2, .b={0x8F, 0x6A},	.width=1, .ifp=IFP_INT},
+	{.str="I^#0xFF",	.cnt=2, .b={0x8F, 0xFF},	.width=1, .ifp=IFP_INT},
+
+	{.str="I^#0x0000",	.cnt=3, .b={0x8F, 0x00,0x00},	.width=2, .ifp=IFP_INT},
+	{.str="I^#0x00FF",	.cnt=3, .b={0x8F, 0xFF,0x00},	.width=2, .ifp=IFP_INT},
+	{.str="I^#0x126A",	.cnt=3, .b={0x8F, 0x6A,0x12},	.width=2, .ifp=IFP_INT},
+	{.str="I^#0xFFFF",	.cnt=3, .b={0x8F, 0xFF,0xFF},	.width=2, .ifp=IFP_INT},
+
+	{.str="I^#0x0000_0000",	.cnt=5, .b={0x8F, 0x00,0x00,0x00,0x00},	.width=4, .ifp=IFP_INT},
+	{.str="I^#0x0000_00FF",	.cnt=5, .b={0x8F, 0xFF,0x00,0x00,0x00},	.width=4, .ifp=IFP_INT},
+	{.str="I^#0x1234_5678",	.cnt=5, .b={0x8F, 0x78,0x56,0x34,0x12},	.width=4, .ifp=IFP_INT},
+	{.str="I^#0xFFFF_FFFF",	.cnt=5, .b={0x8F, 0xFF,0xFF,0xFF,0xFF},	.width=4, .ifp=IFP_INT},
+
+	{.str="I^#0x0000_0000_0000_0000",
+				.cnt=9, .b={0x8F, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00}, .width=8, .ifp=IFP_INT},
+	{.str="I^#0x0000_0000_0000_00FF",
+				.cnt=9, .b={0x8F, 0xFF,0x00,0x00,0x00, 0x00,0x00,0x00,0x00}, .width=8, .ifp=IFP_INT},
+	{.str="I^#0x1234_5678_9ABC_DEF0",
+				.cnt=9, .b={0x8F, 0xF0,0xDE,0xBC,0x9A, 0x78,0x56,0x34,0x12}, .width=8, .ifp=IFP_INT},
+	{.str="I^#0xFFFF_FFFF_FFFF_FFFF",
+				.cnt=9, .b={0x8F, 0xFF,0xFF,0xFF,0xFF, 0xFF,0xFF,0xFF,0xFF},.width=8, .ifp=IFP_INT},
+
+	{.str="I^#0x0000_0000_0000_0000__0000_0000_0000_0000",
+				.cnt=17, .b={0x8F, 0x00,0x00,0x00,0x00,
+	                                           0x00,0x00,0x00,0x00,
+	                                           0x00,0x00,0x00,0x00,
+	                                           0x00,0x00,0x00,0x00},.width=16, .ifp=IFP_INT},
+	{.str="I^#0x0000_0000_0000_0000__0000_0000_0000_00FF",
+				.cnt=17, .b={0x8F, 0xFF,0x00,0x00,0x00,
+	                                           0x00,0x00,0x00,0x00,
+	                                           0x00,0x00,0x00,0x00,
+	                                           0x00,0x00,0x00,0x00},.width=16, .ifp=IFP_INT},
+	{.str="I^#0xFEDC_BA98_7654_3210__0123_4567_89AB_CDEF",
+				.cnt=17, .b={0x8F, 0xEF,0xCD,0xAB,0x89,
+	                                           0x67,0x45,0x23,0x01,
+	                                           0x10,0x32,0x54,0x76,
+	                                           0x98,0xBA,0xDC,0xFE},.width=16, .ifp=IFP_INT},
+	{.str="I^#0xFFFF_FFFF_FFFF_FFFF__FFFF_FFFF_FFFF_FFFF",
+				.cnt=17, .b={0x8F, 0xFF,0xFF,0xFF,0xFF,
+				                   0xFF,0xFF,0xFF,0xFF,
+				                   0xFF,0xFF,0xFF,0xFF,
+				                   0xFF,0xFF,0xFF,0xFF},.width=16, .ifp=IFP_INT},
+
+	/* big immediates, fp values */
+
+	{.str="I^#0",		.cnt=5, .b={0x8F, 0x00,0x00,0x00,0x00}, .width= 4, .ifp=IFP_F},
+	{.str="I^#1",		.cnt=5, .b={0x8F, 0x80,0x40,0x00,0x00}, .width= 4, .ifp=IFP_F},
+	{.str="I^#1.1",		.cnt=5, .b={0x8F, 0x8C,0x40,0xCD,0xCC}, .width= 4, .ifp=IFP_F},
+	{.str="I^#1.1415",	.cnt=5, .b={0x8F, 0x92,0x40,0xAC,0x1C}, .width= 4, .ifp=IFP_F},
+	{.str="I^#123.1",	.cnt=5, .b={0x8F, 0xF6,0x43,0x33,0x33}, .width= 4, .ifp=IFP_F},
+	{.str="I^#-123.1",	.cnt=5, .b={0x8F, 0xF6,0xC3,0x33,0x33}, .width= 4, .ifp=IFP_F},
+	{.str="I^#123100",	.cnt=5, .b={0x8F, 0xF0,0x48,0x00,0x6E}, .width= 4, .ifp=IFP_F},
+	{.str="I^#0.1231",	.cnt=5, .b={0x8F, 0xFC,0x3E,0xDA,0x1B}, .width= 4, .ifp=IFP_F},
+	{.str="I^#1.231E14",	.cnt=5, .b={0x8F, 0xDF,0x57,0xE8,0xEA}, .width= 4, .ifp=IFP_F},
+	{.str="I^#1.231E-10",	.cnt=5, .b={0x8F, 0x07,0x30,0x92,0x59}, .width= 4, .ifp=IFP_F},
+
+	{.str="I^#1.231E-10",	.cnt=9, .b={0x8F, 0x07,0x30,0x91,0x59, 0x79,0xD3,0xDA,0x40}, .width= 8, .ifp=IFP_D},
+	{.str="I^#1.231E-10",	.cnt=9, .b={0x8F, 0x00,0x3E,0x32,0xEB, 0x6F,0x3A,0x1B,0x28}, .width= 8, .ifp=IFP_G},
+	{.str="I^#1.231E-121",	.cnt=17,.b={0x8F, 0x6F,0x3E,0x81,0x45,
+	                                          0x75,0x03,0x54,0x8A,
+	                                          0x39,0xD5,0x0A,0x5C,
+	                                          0xD7,0x79,0x8F,0xDE}, .width=16, .ifp=IFP_H},
+
+	/***/
+
+
+	{.str="r0",		.cnt=1, .b={0x50}, .width=1, .ifp=IFP_INT},
+	{.str="r4",		.cnt=1, .b={0x54}, .width=1, .ifp=IFP_INT},
+	{.str="fp",		.cnt=1, .b={0x5D}, .width=1, .ifp=IFP_INT},
+	{.str="sp",		.cnt=1, .b={0x5F}, .width=1, .ifp=IFP_INT},
+
+	{.str="(r0)",		.cnt=1, .b={0x60}, .width=1, .ifp=IFP_INT},
+	{.str="(fp)",		.cnt=1, .b={0x6D}, .width=1, .ifp=IFP_INT},
+	{.str="(pc)",		.cnt=1, .b={0x6F}, .width=1, .ifp=IFP_INT},
+
+	{.str="-(r0)",		.cnt=1, .b={0x70}, .width=1, .ifp=IFP_INT},
+	{.str="-(fp)",		.cnt=1, .b={0x7D}, .width=1, .ifp=IFP_INT},
+	{.str="-(pc)",		.cnt=1, .b={0x7F}, .width=1, .ifp=IFP_INT},
+
+	{.str="(r2)+",		.cnt=1, .b={0x82}, .width=1, .ifp=IFP_INT},
+	{.str="(ap)+",		.cnt=1, .b={0x8C}, .width=1, .ifp=IFP_INT},
+
+	{.str="@#0x1234_5678",	.cnt=5, .b={0x9F, 0x78,0x56,0x34,0x12}, .width=1, .ifp=IFP_INT},
+
+	{.str="@(r0)+",		.cnt=1, .b={0x90}, .width=1, .ifp=IFP_INT},
+	{.str="@(fp)+",		.cnt=1, .b={0x9D}, .width=1, .ifp=IFP_INT},
+
+	/* pcrel/disp */
+	{.str="B^0xCAFE_BB00",	.cnt=2, .b={0xAF, 0x42}, .width=1, .ifp=IFP_INT},
+	{.str="B^100(fp)",	.cnt=2, .b={0xAD, 0x64}, .width=1, .ifp=IFP_INT},
+	{.str="@B^0xCAFE_BB00",	.cnt=2, .b={0xBF, 0x42}, .width=1, .ifp=IFP_INT},
+	{.str="@B^100(fp)",	.cnt=2, .b={0xBD, 0x64}, .width=1, .ifp=IFP_INT},
+
+	{.str="W^0xCAFE_C000",	.cnt=3, .b={0xCF, 0x42,0x05}, .width=1, .ifp=IFP_INT},
+	{.str="W^1000(fp)",	.cnt=3, .b={0xCD, 0xE8,0x03}, .width=1, .ifp=IFP_INT},
+	{.str="@W^0xCAFE_C000",	.cnt=3, .b={0xDF, 0x42,0x05}, .width=1, .ifp=IFP_INT},
+	{.str="@W^1000(fp)",	.cnt=3, .b={0xDD, 0xE8,0x03}, .width=1, .ifp=IFP_INT},
+
+	{.str="L^0xCC00_C000",	.cnt=5, .b={0xEF, 0x42,0x05,0x02,0x01}, .width=1, .ifp=IFP_INT},
+	{.str="L^100000(fp)",	.cnt=5, .b={0xED, 0xA0,0x86,0x01,0x00}, .width=1, .ifp=IFP_INT},
+	{.str="@L^0xCC00_C000",	.cnt=5, .b={0xFF, 0x42,0x05,0x02,0x01}, .width=1, .ifp=IFP_INT},
+	{.str="@L^100000(fp)",	.cnt=5, .b={0xFD, 0xA0,0x86,0x01,0x00}, .width=1, .ifp=IFP_INT},
+
+
+	/* indexed operands (some of he combinations here are illegal) */
+	{.str="(r2)[fp]",		.cnt=2, .b={0x4D,0x62}, .width=1, .ifp=IFP_INT},
+	{.str="(pc)[fp]",		.cnt=2, .b={0x4D,0x6F}, .width=1, .ifp=IFP_INT},
+	{.str="(r2)[pc]",		.cnt=2, .b={0x4F,0x62}, .width=1, .ifp=IFP_INT},
+	{.str="-(r2)[fp]",		.cnt=2, .b={0x4D,0x72}, .width=1, .ifp=IFP_INT},
+	{.str="(r2)+[fp]",		.cnt=2, .b={0x4D,0x82}, .width=1, .ifp=IFP_INT},
+	{.str="@#0x1234_5678[fp]",	.cnt=6, .b={0x4D,0x9F, 0x78,0x56,0x34,0x12}, .width=1, .ifp=IFP_INT},
+	{.str="@(r2)+[fp]",		.cnt=2, .b={0x4D,0x92}, .width=1, .ifp=IFP_INT},
+
+
+	{.str="B^0xCAFE_BB00[fp]",	.cnt=3, .b={0x4D,0xAF, 0x42}, .width=1, .ifp=IFP_INT},
+	{.str="B^100(r2)[fp]",		.cnt=3, .b={0x4D,0xA2, 0x64}, .width=1, .ifp=IFP_INT},
+	{.str="@B^^XCAFE_BB00[fp]",	.cnt=3, .b={0x4D,0xBF, 0x42}, .width=1, .ifp=IFP_INT},
+	{.str="@B^100(r2)[fp]",		.cnt=3, .b={0x4D,0xB2, 0x64}, .width=1, .ifp=IFP_INT},
+
+	{.str="W^0xCAFE_C000[fp]",	.cnt=4, .b={0x4D,0xCF, 0x42,0x05}, .width=1, .ifp=IFP_INT},
+	{.str="W^1000(r2)[fp]",		.cnt=4, .b={0x4D,0xC2, 0xE8,0x03}, .width=1, .ifp=IFP_INT},
+	{.str="@W^0xCAFE_C000[fp]",	.cnt=4, .b={0x4D,0xDF, 0x42,0x05}, .width=1, .ifp=IFP_INT},
+	{.str="@W^1000(r2)[fp]",	.cnt=4, .b={0x4D,0xD2, 0xE8,0x03}, .width=1, .ifp=IFP_INT},
+
+	{.str="L^0xCC00_C000[fp]",	.cnt=6, .b={0x4D,0xEF, 0x42,0x05,0x02,0x01}, .width=1, .ifp=IFP_INT},
+	{.str="L^100000(r2)[fp]",	.cnt=6, .b={0x4D,0xE2, 0xA0,0x86,0x01,0x00}, .width=1, .ifp=IFP_INT},
+	{.str="@L^0xCC00_C000[fp]",	.cnt=6, .b={0x4D,0xFF, 0x42,0x05,0x02,0x01}, .width=1, .ifp=IFP_INT},
+	{.str="@L^100000(r2)[fp]",	.cnt=6, .b={0x4D,0xF2, 0xA0,0x86,0x01,0x00}, .width=1, .ifp=IFP_INT},
+
+};
+
+
+void sim_run(struct test_dis_case test)
 {
-	assert((test.cnt > 0) && (test.cnt <= (int) sizeof(test.b)));
-	assert((test.width == 1) || (test.width == 2) || (test.width == 4) || (test.width == 8));
+	assert((test.cnt >= 0) && (test.cnt <= (int) sizeof(test.b)));
+	assert((test.width == 1) || (test.width == 2) || (test.width == 4) || (test.width == 8) || (test.width == 16));
 
 	struct fields	fields;
 	memset(&fields, 0xFF, sizeof(fields));
@@ -606,7 +2453,7 @@ void sim_run(struct testcase test)
 	case IFP_G:	printf("g "); break;
 	case IFP_H:	printf("h "); break;
 	default:
-		assert(0);
+		UNREACHABLE();
 	}
 
 	if (sim_ret.cnt == -1)
@@ -646,6 +2493,8 @@ void sim_run(struct testcase test)
 		printf("Rx=%d ", fields.Rx);
 	if (fields.addr != -1)
 		printf("addr=%04X_%04X ", SPLIT(fields.addr));
+	if (fields.disp != -1)
+		printf("disp=%04X_%04X ", SPLIT(fields.disp));
 	if ((fields.imm.val[0] != (uint32_t) -1) || (fields.imm.val[1] != (uint32_t) -1)) {
 		printf("imm[0]=%04X_%04X ", SPLIT(fields.imm.val[0]));
 		if (fields.imm.val[1] != (uint32_t) -1)
@@ -664,16 +2513,241 @@ void test_sim()
 {
 	printf("Simulator\n");
 	printf("---------\n");
-	for (unsigned i=0; i < ARRAY_SIZE(tests); i++)
-		sim_run(tests[i]);
+	for (unsigned i=0; i < ARRAY_SIZE(dis_vax); i++)
+		sim_run(dis_vax[i]);
 
 	printf("\n");
 }
-#else
-void test_sim()
+
+
+/***/
+
+/* Crappy benchmarking of operand handling.
+
+   The measurements are surprisingly unsteady :(
+
+   I should probably switch to using something like a robust regression
+   framework that throws out slow outliers + automatically figure out how many
+   iterations to have of each benchmark for the benchmark itself to be slower
+   than the clock_xxxx() housekeeping.
+
+   I tried to make it nicer -- time_asm() is a relic of that -- but it doesn't
+   help much.
+
+   ---
+
+   I should also try to benchmark each asm_vax/dis_vax testcase individually,
+   so I know what is costly and what isn't.
+
+ */
+
+
+/* time difference in µs */
+double timediff(struct timespec from, struct timespec to)
 {
+	return (to.tv_sec - from.tv_sec) * 1000 * 1000.0  + (to.tv_nsec - from.tv_nsec) / 1000.0;
 }
-#endif
+
+
+void time_asm()
+{
+	for (unsigned i=0; i < ARRAY_SIZE(asm_vax); i++) {
+		uint8_t	b[MAX_OPLEN];
+
+		parse_init(asm_vax[i].str);
+		(volatile int) op_asm_vax(b, 0xCAFEBABE, asm_vax[i].width, asm_vax[i].ifp);
+		parse_done();
+	}
+}
+
+
+void time_dis()
+{
+	for (unsigned i=0; i < ARRAY_SIZE(dis_vax); i++) {
+		(volatile struct dis_ret) op_dis_vax(dis_vax[i].b, 0xCAFEBABE, dis_vax[i].width, dis_vax[i].ifp);
+	}
+}
+
+
+void time_sim()
+{
+	for (unsigned i=0; i < ARRAY_SIZE(dis_vax); i++) {
+		struct fields	fields;
+
+		(volatile struct sim_ret) op_sim(dis_vax[i].b, &fields, dis_vax[i].width, dis_vax[i].ifp);
+	}
+}
+
+
+void time_val()
+{
+	for (unsigned i=0; i < ARRAY_SIZE(dis_vax); i++) {
+		(volatile bool) op_val(dis_vax[i].b, asm_vax[i].width);
+	}
+}
+
+
+void time_op()
+{
+	struct timespec		asm_start, asm_stop;
+	struct timespec		dis_start, dis_stop;
+	struct timespec		sim_start, sim_stop;
+	struct timespec		val_start, val_stop;
+
+	printf("Timing\n");
+	printf("------\n");
+
+	/* give I/O system, terminal emulator, and X some time to react before
+	   we start timing things.
+	 */
+	fflush(NULL);
+	struct timespec		sleep = {.tv_nsec=1000*1000};	/* 1ms */
+	nanosleep(&sleep, NULL);
+
+	/* op_asm_vax */
+	long		asm_cnt = 0;
+
+	clock_gettime(CLOCK_THREAD_CPUTIME_ID, &asm_start);
+	time_asm();
+	clock_gettime(CLOCK_THREAD_CPUTIME_ID, &asm_stop);
+
+	clock_gettime(CLOCK_THREAD_CPUTIME_ID, &asm_start);
+	while (1) {
+		for (unsigned i=0; i < 10; i++) {
+			asm_cnt++;
+			time_asm();
+		}
+		clock_gettime(CLOCK_THREAD_CPUTIME_ID, &asm_stop);
+		if ((timediff(asm_start, asm_stop) > 100000.0) && (asm_cnt > 300))
+			break;
+	}
+
+	/* op_dis_vax */
+	long		dis_cnt = 0;
+
+	clock_gettime(CLOCK_THREAD_CPUTIME_ID, &dis_start);
+	time_dis();
+	clock_gettime(CLOCK_THREAD_CPUTIME_ID, &dis_stop);
+
+	clock_gettime(CLOCK_THREAD_CPUTIME_ID, &dis_start);
+	while (1) {
+		for (unsigned i=0; i < 10; i++) {
+			dis_cnt++;
+			time_dis();
+		}
+		clock_gettime(CLOCK_THREAD_CPUTIME_ID, &dis_stop);
+		if ((timediff(dis_start, dis_stop) > 100000.0) && (dis_cnt > 300))
+			break;
+	}
+
+	/* op_sim */
+	long	sim_cnt = 0;
+
+	clock_gettime(CLOCK_THREAD_CPUTIME_ID, &sim_start);
+	time_sim();
+	clock_gettime(CLOCK_THREAD_CPUTIME_ID, &sim_stop);
+
+	clock_gettime(CLOCK_THREAD_CPUTIME_ID, &sim_start);
+	while (1) {
+		for (unsigned i=0; i < 10; i++) {
+			sim_cnt++;
+			time_sim();
+		}
+		clock_gettime(CLOCK_THREAD_CPUTIME_ID, &sim_stop);
+		if ((timediff(sim_start, sim_stop) > 100000.0) && (sim_cnt > 300))
+			break;
+	}
+
+	/* op_val */
+	long	val_cnt = 0;
+
+	clock_gettime(CLOCK_THREAD_CPUTIME_ID, &val_start);
+	time_val();
+	clock_gettime(CLOCK_THREAD_CPUTIME_ID, &val_stop);
+
+	clock_gettime(CLOCK_THREAD_CPUTIME_ID, &val_start);
+	while (1) {
+		for (unsigned i=0; i < 10; i++) {
+			val_cnt++;
+			time_val();
+		}
+		clock_gettime(CLOCK_THREAD_CPUTIME_ID, &val_stop);
+		if ((timediff(val_start, val_stop) > 100000.0) && (val_cnt > 300))
+			break;
+	}
+
+	printf("op_asm_vax()    %g µs/call  (%g µs, %ld calls)\n", timediff(asm_start, asm_stop) / ARRAY_SIZE(asm_vax) / asm_cnt, timediff(asm_start, asm_stop), asm_cnt);
+	printf("op_dis_vax()    %g µs/call  (%g µs, %ld calls)\n", timediff(dis_start, dis_stop) / ARRAY_SIZE(dis_vax) / dis_cnt, timediff(dis_start, dis_stop), dis_cnt);
+	printf("op_sim()        %g µs/call  (%g µs, %ld calls)\n", timediff(sim_start, sim_stop) / ARRAY_SIZE(dis_vax) / sim_cnt, timediff(sim_start, sim_stop), sim_cnt);
+	printf("op_val()        %g µs/call  (%g µs, %ld calls)\n", timediff(val_start, val_stop) / ARRAY_SIZE(dis_vax) / val_cnt, timediff(val_start, val_stop), val_cnt);
+
+	printf("\n");
+}
+
+
+/***/
+
+/* "timing" -- useful for external profilers, such as cachegrind, perf, ...
+
+   ---
+
+   $ valgrind --tool=cachegrind --cachegrind-out-file=<file> --branch-sim=yes ./test-op --time-asm
+   $ cg_annotate --auto=yes <file>
+
+   ---
+
+   $ perf ./test-op --time-asm
+
+ */
+
+void time_op_asm(unsigned cnt)
+{
+	while (cnt--) {
+		for (unsigned i=0; i < ARRAY_SIZE(asm_vax); i++) {
+			uint8_t	b[MAX_OPLEN];
+
+			parse_init(asm_vax[i].str);
+			(volatile int) op_asm_vax(b, 0xCAFEBABE, asm_vax[i].width, asm_vax[i].ifp);
+			parse_done();
+		}
+	}
+}
+
+
+
+void time_op_dis(unsigned cnt)
+{
+	while (cnt--) {
+		for (unsigned i=0; i < ARRAY_SIZE(dis_vax); i++) {
+			(volatile struct dis_ret) op_dis_vax(dis_vax[i].b, 0xCAFEBABE, dis_vax[i].width, dis_vax[i].ifp);
+		}
+	}
+}
+
+
+
+void time_op_sim(unsigned cnt)
+{
+	while (cnt--) {
+		for (unsigned i=0; i < ARRAY_SIZE(dis_vax); i++) {
+			struct fields	fields;
+
+			(volatile struct sim_ret) op_sim(dis_vax[i].b, &fields, dis_vax[i].width, dis_vax[i].ifp);
+		}
+	}
+}
+
+
+
+void time_op_val(unsigned cnt)
+{
+	while (cnt--) {
+		for (unsigned i=0; i < ARRAY_SIZE(dis_vax); i++) {
+			(volatile bool) op_val(dis_vax[i].b, asm_vax[i].width);
+		}
+	}
+}
+
 
 
 /***/
@@ -714,156 +2788,11 @@ void dump_afl(struct afl_input afl)
 	case IFP_G:   printf("g");   break;
 	case IFP_H:   printf("h");   break;
 	default:
-		assert(0);
+		UNREACHABLE();
 	}
 	printf("\n");
 }
 
-
-#if 0
-
-/* Read a line that describes the input parameters to dis/sim/val decoders
-
-   In case of an error in the input, exit but do not abort!  We don't want to
-   tell AFL that it found a bug in the program!
- */
-struct afl_input afl_input()
-{
-	struct afl_input	afl = {};
-
-	printf("width ::= 1/2/4/8/16\n");
-	printf("ifp   ::= I/F/D/G/H\n");
-	printf("byte  ::= [0-9A-F][0-9A-F]\n");
-	printf("\n");
-
-
-	/* read from stdin to EOL or EOF */
-	char	inputbuf[100];
-
-	if (!fgets(inputbuf, sizeof(inputbuf), stdin)) {
-		fprintf(stderr, "AFL mode, couldn't read from stdin.\n");
-		exit(EXIT_SUCCESS);	/* ? */
-	}
-
-	/* parse input:
-
-	   <width> <ifp> [<byte>]*
-
-	   width ::= 1/2/4/8/16
-	   ifp   ::= I/F/D/G/H
-	   byte  ::= [0-9A-F][0-9A-F]
-	 */
-
-	parse_init(inputbuf);
-
-	parse_begin();
-	parse_int(&afl.width);
-	if (!parse_ok) {
-		fprintf(stderr, "AFL mode, expected 1/2/4/8/16 from stdin.\n");
-		exit(EXIT_SUCCESS);	/* ? */
-	}
-	if ((afl.width != 1) && (afl.width != 2) && (afl.width != 4) && (afl.width != 8) && (afl.width != 16)) {
-		fprintf(stderr, "AFL mode, expected 1/2/4/8/16 from stdin.\n");
-		exit(EXIT_SUCCESS);	/* ? */
-	}
-	printf("width: %d\n", afl.width);
-
-
-	char	ch;
-	parse_skipws();
-	if (!parse_oneof_ch("IFDGH", &ch)) {
-		fprintf(stderr, "AFL mode, expected I/F/D/G/H from stdin.\n");
-		exit(EXIT_SUCCESS);	/* ? */
-	}
-	switch (ch) {
-	case 'I': afl.ifp = IFP_INT; break;
-	case 'F': afl.ifp = IFP_F; break;
-	case 'D': afl.ifp = IFP_D; break;
-	case 'G': afl.ifp = IFP_G; break;
-	case 'H': afl.ifp = IFP_H; break;
-	default:
-		assert(0);
-	}
-	printf("ifp: %d\n", (int) afl.ifp);
-
-	/* check that width and ifp match */
-	if (((afl.ifp == IFP_F) && (afl.width != 4)) ||
-	    ((afl.ifp == IFP_D) && (afl.width != 8)) ||
-	    ((afl.ifp == IFP_G) && (afl.width != 8)) ||
-	    ((afl.ifp == IFP_H) && (afl.width != 16))) {
-		fprintf(stderr, "AFL mode, ifp and width don't match.\n");
-		exit(EXIT_SUCCESS);	/* ? */
-	}
-
-	parse_skipws();
-
-
-	/* bytes in hex */
-	while (afl.cnt < MAX_OPLEN) {
-		parse_begin();
-		parse_skipws();
-
-		char	ch_hi, ch_lo;
-		parse_oneof_ch("0123456789ABCDEF", &ch_hi);
-		parse_oneof_ch("0123456789ABCDEF", &ch_lo);
-		if (!parse_ok) {
-			parse_rollback();
-			break;
-		}
-		parse_commit();
-		afl.b[afl.cnt] = (from_hex_ch(ch_hi) << 4) | from_hex_ch(ch_lo);
-		afl.cnt++;
-	}
-
-	if (!parse_eof()) {
-		fprintf(stderr, "AFL mode, garbage at end of line after the bytes.\n");
-		exit(EXIT_SUCCESS);	/* ? */
-	}
-
-	return afl;
-}
-
-
-
-void afl_dis()
-{
-	struct afl_input afl;
-
-	afl = afl_input();
-
-//	dump_afl(afl);
-
-	afl_dis_once(afl);
-}
-
-
-
-void afl_sim()
-{
-	struct afl_input afl;
-
-	afl = afl_input();
-
-//	dump_afl(afl);
-
-	afl_sim_once(afl);
-}
-
-
-void afl_val()
-{
-	struct afl_input afl;
-
-	afl = afl_input();
-
-//	dump_afl(afl);
-
-	if (op_val(afl.b, afl.width))
-		printf("valid.\n");
-	else
-		printf("reserved addressing mode.\n");
-}
-#endif
 
 
 /***/
@@ -895,7 +2824,7 @@ void afl_dis_once(struct afl_input afl)
 	char	buf[100];
 	memset(buf, 0x0, sizeof(buf));
 
-	struct dis_ret dis_ret = op_dis_sane(afl.b, afl.width, afl.ifp);
+	struct dis_ret dis_ret = op_dis_sane(afl.b, 0xCAFEBABE, afl.width, afl.ifp);
 	if (dis_ret.cnt == -1) {
 		printf("reserved addressing mode.\n");
 		return;
@@ -1059,17 +2988,17 @@ void afl_output()
 
 
 	/* create byte sequence files (decoder tests) */
-	for (unsigned i=0; i < ARRAY_SIZE(tests); i++) {
+	for (unsigned i=0; i < ARRAY_SIZE(dis_vax); i++) {
 		/* file name = hex bytes + '.auto' */
 		char	fname[1000] = {};
 
 		strcpy(fname, TEST_DIR);
-		if (tests[i].cnt == 0) {
+		if (dis_vax[i].cnt == 0) {
 			sprintf(fname+strlen(fname), "zero-bytes");
 		} else {
-			for (int j=0; j < tests[i].cnt; j++) {
+			for (int j=0; j < dis_vax[i].cnt; j++) {
 				assert(strlen(fname) + 100 < sizeof(fname));
-				sprintf(fname+strlen(fname), "%02X", tests[i].b[j]);
+				sprintf(fname+strlen(fname), "%02X", dis_vax[i].b[j]);
 			}
 		}
 		sprintf(fname+strlen(fname), ".auto");
@@ -1085,8 +3014,8 @@ void afl_output()
 		}
 
 		/* write */
-		for (int j=0; j < tests[i].cnt; j++)
-			fprintf(f, "%c", tests[i].b[j]);
+		for (int j=0; j < dis_vax[i].cnt; j++)
+			fprintf(f, "%c", dis_vax[i].b[j]);
 
 		/* close */
 		fclose(f);
@@ -1127,18 +3056,19 @@ void help()
 	fprintf(stderr, "./test-op <mode>\n");
 	fprintf(stderr, "\n");
 	fprintf(stderr, " mode:\n");
-	fprintf(stderr, "   --built-in    built-in test of asm/dis/sim\n");
+	fprintf(stderr, "   --built-in        built-in test of asm/dis/sim\n");
+	fprintf(stderr, "   --built-in-parse  built-in test of parse_bigint/parse_fp\n");
+	fprintf(stderr, "   --time            time op_asm+op_dis+op_sim+op_val\n");
+	fprintf(stderr, "   --time-asm        time op_asm\n");
+	fprintf(stderr, "   --time-dis        time op_dis\n");
+	fprintf(stderr, "   --time-sim        time op_sim\n");
+	fprintf(stderr, "   --time-val        time op_val\n");
 	fprintf(stderr, "\n");
-	fprintf(stderr, "   --output      write tests cases to %s directory\n", TEST_DIR);
-	fprintf(stderr, "   --test-asm    test asm with a line from stdin\n");
-	fprintf(stderr, "   --test-dis    test asm with a byte sequence from stdin\n");
-	fprintf(stderr, "   --test-sim    test sim with a byte sequence from stdin\n");
-	fprintf(stderr, "   --test-val    test val with a byte sequence from stdin\n");
-#if 0
-	fprintf(stderr, "   --dis-bin     test asm with a byte sequence from stdin, raw bytes\n");
-	fprintf(stderr, "   --sim-bin     test sim with a byte sequence from stdin, raw bytes\n");
-	fprintf(stderr, "   --val-bin     test val with a byte sequence from stdin, raw bytes\n");
-#endif
+	fprintf(stderr, "   --output          write tests cases to %s directory\n", TEST_DIR);
+	fprintf(stderr, "   --test-asm        test asm with a line from stdin\n");
+	fprintf(stderr, "   --test-dis        test asm with a byte sequence from stdin\n");
+	fprintf(stderr, "   --test-sim        test sim with a byte sequence from stdin\n");
+	fprintf(stderr, "   --test-val        test val with a byte sequence from stdin\n");
 	fprintf(stderr, "\n");
 	fprintf(stderr, " --test-(asm|dis|sim|val), --output are used for testing with American Fuzzy Lop.\n");
 	exit(EXIT_FAILURE);
@@ -1158,6 +3088,20 @@ int main(int argc, char *argv[argc])
 		test_asm();
 		test_dis();
 		test_sim();
+	} else if (strcmp(argv[1], "--built-in-parse") == 0) {
+		test_parse();
+
+	} else if (strcmp(argv[1], "--time") == 0) {
+		time_op();
+	} else if (strcmp(argv[1], "--time-asm") == 0) {
+		time_op_asm(1000);
+	} else if (strcmp(argv[1], "--time-dis") == 0) {
+		time_op_dis(1000);
+	} else if (strcmp(argv[1], "--time-sim") == 0) {
+		time_op_sim(1000);
+	} else if (strcmp(argv[1], "--time-val") == 0) {
+		time_op_val(1000);
+
 	} else if (strcmp(argv[1], "--test-asm") == 0) {
 		afl_asm();
 	} else if (strcmp(argv[1], "--test-dis") == 0) {
@@ -1166,14 +3110,6 @@ int main(int argc, char *argv[argc])
 		afl_sim();
 	} else if (strcmp(argv[1], "--test-val") == 0) {
 		afl_val();
-#if 0
-	} else if (strcmp(argv[1], "--dis-bin") == 0) {
-		afl_dis_bin();
-	} else if (strcmp(argv[1], "--sim-bin") == 0) {
-		afl_sim_bin();
-	} else if (strcmp(argv[1], "--val-bin") == 0) {
-		afl_val_bin();
-#endif
 	} else if (strcmp(argv[1], "--output") == 0) {
 		afl_output();
 	} else {
@@ -1182,6 +3118,10 @@ int main(int argc, char *argv[argc])
 #ifdef __AFL_HAVE_MANUAL_CONTROL
 	}
 #endif
+
+	/* make valgrind happy */
+	mpfr_free_cache();
+
 	return EXIT_SUCCESS;
 }
 

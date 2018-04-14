@@ -25,10 +25,17 @@ misc/*.lang
 xxx*
 *.swp
 
+# ctags (used by misc/check-reserved.pl)
+tags
+
+# releases
+revax-*.tar.gz
+revax-*.zip
+
 # executables -- standard programs
-asm
-dis
-sim
+revax-asm
+revax-dis
+revax-sim
 
 # executables -- internal tools/test/experiments
 a.out
@@ -37,12 +44,19 @@ src/fragtable
 misc/regalloc
 idioms
 fp-ieee
+cmp-sub
 
 test-big-int
 test-fp
 test-op
 test-alu
 test-analyze
+
+test-big-int-nosan
+test-fp-nosan
+test-op-nosan
+test-alu-nosan
+test-analyze-nosan
 
 afl-test-big-int
 afl-test-fp

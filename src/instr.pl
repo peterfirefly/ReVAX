@@ -354,14 +354,11 @@ sub print_for_c() {
 			print "   ";
 		}
 
+		my $fmt = (($i & 0x7) == 0x7) ? "%s\n" : "%-9s";
 		if (exists $mne{$i}) {
-			print "\"", $mne{$i}, "\",", " " x (6 - length $mne{$i});
+			printf $fmt, '"' . $mne{$i} . '",';
 		} else {
-			print "\"\",", " " x 6;
-		}
-
-		if (($i & 0x7) == 0x7) {
-			print "\n";
+			printf $fmt, '"",';
 		}
 	}
 
@@ -378,14 +375,11 @@ sub print_for_c() {
 			print "   ";
 		}
 
+		my $fmt = (($i & 0x7) == 0x7) ? "%s\n" : "%-9s";
 		if (exists $mne{$i}) {
-			print "\"", $mne{$i}, "\",", " " x (6 - length $mne{$i});
+			printf $fmt, '"' . $mne{$i} . '",';
 		} else {
-			print "\"\",", " " x 6;
-		}
-
-		if (($i & 0x7) == 0x7) {
-			print "\n";
+			printf $fmt, '"",';
 		}
 	}
 	print  "};\n";
@@ -686,14 +680,11 @@ sub print_for_perl()
 			print "   ";
 		}
 
+		my $fmt = (($i & 0x7) == 0x7) ? "%s\n" : "%-9s";
 		if (exists $mne{$i}) {
-			print "\"", $mne{$i}, "\",", " " x (6 - length $mne{$i});
+			printf $fmt, '"' . $mne{$i} . '",';
 		} else {
-			print "\"\",", " " x 6;
-		}
-
-		if (($i & 0x7) == 0x7) {
-			print "\n";
+			printf $fmt, '"",';
 		}
 	}
 
@@ -711,14 +702,11 @@ sub print_for_perl()
 			print "   ";
 		}
 
+		my $fmt = (($i & 0x7) == 0x7) ? "%s\n" : "%-9s";
 		if (exists $mne{$i}) {
-			print "\"", $mne{$i}, "\",", " " x (6 - length $mne{$i});
+			printf $fmt, '"' . $mne{$i} . '",';
 		} else {
-			print "\"\",", " " x 6;
-		}
-
-		if (($i & 0x7) == 0x7) {
-			print "\n";
+			printf $fmt, '"",';
 		}
 	}
 	print  ");\n";

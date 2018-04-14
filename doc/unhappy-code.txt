@@ -31,6 +31,21 @@ Would afl-in/, afl-out/ be better?
 
 
 
+Makefile, test code
+---
+We need lots of executables from the same code: normal test programs for
+timing/profiling/valgrind, test programs with assertions and sanitizers, and
+test programs compiled for AFL (also with assertions and sanitizers).
+Probably also a set compiled for profiling with gprof.  Maybe one more for
+coverage tests.
+
+This gets ugly quickly with GNU Make, especially combined with #include file
+dependency checks.
+
+Meson will probably solve this problem.
+
+
+
 Address translation, unaligned access, I/O
 ---
 The code is incomplete and I'm not happy about where the lines go between the
@@ -53,6 +68,14 @@ used by the disassembler are plenty good enough as is.
 The machine-generated parsers could use a tree-like parsing without too much
 difficulty and that would let me keep the low-level parser code exactly the
 same.
+
+
+
+Parser II
+---
+Actually, the more I work with it, the less happy I am with the way the
+transactions and parse_ok work.  It is too hard to use correctly.
+
 
 
 
@@ -99,6 +122,71 @@ Some of the address generation is even slower because there is no dedicated
 address generation unit in the "Mark 1" ideal microarchitecture.  It also forces
 the microcode to use a 'readpc' µop with all the synchronization problems that
 entails.
+
+
+
+Microcode labels (addressing modes) and C #define's
+---
+All the special microcode labels (those that don't correspond directly to the
+exe phase of an instruction) get a corresponding #define in src/vax-ucode.h
+by the src/uasm.pl translator.
+
+The microcode that handles addressing modes has names like "_addr-[--Rn]" which
+gets translated to a macro by the name LBL_ADDR____RN_.  The correspondence is
+not entirely obvious...
+
+I would like to handle this better... somehow.
+
+Currently, '['/']'/'-' are all translated to '_' and '+' is translated to 'X'.
+All characters are uppercased.  If only we could do better, somehow.
+
+We could use macro trickery to express it as LBL_ADDR_(mmRN), where the mmRN
+argument to LBL_ADDR_() evaluates to just the right microcode address.
+
+We could use 'p' for '+' and 'm' for '-'.
+
+That's not a solution I like, either.  I think it's worse than the current one.
+
+Maybe if all special characters were translated using lower case?
+ '+'	-->	'p'
+ '-'	-->	'm'
+ '['	-->	?	a
+ ']'	-->	?	z
+ '('	-->	?
+ ')'	-->	?
+
+Instead of using "+INDEX(Rx)", I could use "+Rx*scale" or "+SCALED(RX)" or
+"+Rx<<SCALE" or "+RX<<SIZE" or "+RX<<BYTES" or "+RX<<WIDTH".
+
+ '*'	-->	'x'
+ '<<'	-->	'shl'
+
+Or maybe: LBL_ADDR_ImmRnI?  LBL_ADDR_xmmRnx?  LBL_ADDR_x_Rn_p_Rx_shl_WIDTH_x?
+
+I'm not happy that the labels in ucode.vu use '_' and the labels in operands.spec
+use spaces to make the elements of the addressing mode line up nicely.  I'm not
+happy that the number of spaces and the number of '_' have to match.  I wish
+both were treated like "elastic" whitespace.
+
+Yeah, actually, just getting rid of '_'/' ' whitespace inside operands.pl/uasm.pl
+would both make the label matching be nicer and would make the C macro name
+nicer.  Using 'p' for '+' and 'm' for '-' would probably help a bit more.
+
+This would yield macro names like:
+
+  LBL_ADDR___Rnpp__
+  LBL_ADDR__Rnpp_
+  LBL_ADDR__mmRn_
+
+  LBL_ADDR__RnpINDEX_Rx__
+  LBL_ADDR__mmRnpINDEX_Rx__
+
+Hmmm... writing the label name in a comment would help a lot:
+
+#define LBL_ADDR____RN_                     104	/* -addr-[--Rn]                */
+#define LBL_ADDR____RN_____XINDEX_RX__       70	/* -addr-[--Rn_____+index(Rx)] */
+#define LBL_ADDR__RN_______XINDEX_RX__       68	/* -addr-[Rn_______+index(Rx)] */
+#define LBL_ADDR___PCXDISP_XINDEX_RX__       97 /* -addr-[[PC+disp]+index(Rx)] */
 
 
 
@@ -154,6 +242,20 @@ The third draft is much nicer.  It is completely applicative (state-less) and
 doesn't know a thing about the rest of the simulator, except for some of the
 µops and of course the registers/flags.
 
+
+Width, as # of bytes, as enum, as #defines
+---
+I started out using #defines, then changed it to an enum (much better).  But I
+also use # of bytes (1/2/4/8/16) elsewhere in the code.  The enum is for the
+compressed and expanded µcode.
+
+Compressed µcode needs: 1/2/4/<width>.
+Expanded µcode needs: 1/2/4/8 -- 8 is necessary for MOVQ, CLRQ, ASHQ, PUSHAQ, MOVAQ.
+
+More will be needed once/if octowords and floating-point gets supported natively.
+
+The internals in the assembler/disasssembler/simulator should use no of bytes,
+unless (in the simulator) it feels very natural to use the enum.
 
 
 ------------------------------------------------------------------------------
@@ -228,5 +330,19 @@ but I stalled for an eternity on:
 
 The last misunderstandings/dumb ideas were cleaned up while writing uops.spec
 for the table-driven version of uasm.pl and dis-uop.h.
+
+
+
+Operands.spec is too hard to read
+---
+I really like operands.spec/operands.pl, but it is too hard to read the actions
+for asm/dis with all the '<...>', '_', and ':xxx*.
+
+I don't actually have to change the syntax to solve the problem:  I can add an
+output mode to operands.pl that prints out the asm/dis sections with a "cleaned
+up" version of the actions.
+
+(This turned out to be easy to do -- and it was enough to make operands.spec
+much easier to work with.)
 
 

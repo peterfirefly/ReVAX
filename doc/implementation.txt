@@ -182,7 +182,7 @@ the forwarded result.
      None of the code has been seriously tested yet.
 
      The code is intended to be smaller and easier to understand than the three
-     other open-source VAX simulators that I know of (SimH, ts10, evax).
+     other open-source VAX simulators that I know of (SimH, ts10, eVAX).
 
      It should be simple enough to be used as a "ground truth" model of VAX
      behaviour.

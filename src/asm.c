@@ -1,4 +1,4 @@
-/* Copyright 2018  Peter Lund <firefly@vax64.dk>\
+/* Copyright 2018  Peter Lund <firefly@vax64.dk>
 
    Licensed under GPL v2.
 
@@ -23,10 +23,19 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "shared.h"
+#include "string-utils.h"
+#include "parse.h"
 
 #include "vax-instr.h"
 
+#include "fp.h"
+
+#define STATIC static
+#include "op-asm-support.h"
+#include "op-asm.h"
+
+#include "op-val-support.h"
+#include "op-val.h"
 
 /***/
 
@@ -414,13 +423,17 @@ int main(int argc, char *argv[])
 {
 	/* parse command line */
 
-	if (argc == 1) {
-		help();
-		exit(0);
-	}
-
 	if (argc != 2)
 		help_exit();
+
+	if (strcmp(argv[1], "--version") == 0) {
+		printf("revax-asm %s (commit %s)\n", VERSION, GITHASH);
+		printf("compiled %s on %s with %s.\n", NOW, PLATFORM, CCVER);
+		printf("\n");
+		printf("  %s\n", REVAXURL);
+
+		exit(0);
+	}
 
 	char	*fname = argv[1];
 	char	*barename = cut_ext(fname);

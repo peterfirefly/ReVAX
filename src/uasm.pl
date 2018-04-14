@@ -828,6 +828,8 @@ sub write_tables() {
 	printf "\n";
 	printf "#define LAST\t.last=1\n";
 	printf "\n";
+	printf "#define MAXFLOWLEN	%d\n", $maxflowlen;
+	printf "\n";
 	printf "struct uop {\n";
 	printf "\tenum uopcode\top;\n";
 	printf "\tuint32_t\timm;\n";
@@ -1090,7 +1092,7 @@ sub write_stats() {
 			next;
 		}
 		if (not exists $lbl_use{$s}) {
-			printf "  %-30s\n", $s;
+			printf "  %s\n", $s;
 		}
 	}
 	print "\n";
