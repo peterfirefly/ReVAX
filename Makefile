@@ -29,7 +29,7 @@ VERSION=v0.1
 GITHASH=$(shell cat .git/refs/heads/master)
 PLATFORM=$(shell . /etc/lsb-release; echo $$DISTRIB_DESCRIPTION)
 NOW=$(shell date --utc '+%Y-%m-%d %H:%M:%S') UTC
-REVAXURL=http://github.com/peterfirefly/revax
+REVAXURL=https://github.com/peterfirefly/ReVAX
 CCVER=$(shell $(CC) --version | head -n1)
 
 ###
