@@ -54,6 +54,7 @@
 
 #include <mpfr.h>
 
+#include "macros.h"
 #include "strret.h"
 #include "big-int.h"
 

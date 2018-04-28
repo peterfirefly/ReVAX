@@ -36,6 +36,7 @@ revax-*.zip
 revax-asm
 revax-dis
 revax-sim
+revax-uop
 
 # executables -- internal tools/test/experiments
 a.out
@@ -82,12 +83,13 @@ src/op-val.h
 runtime/test*.bin
 
 # disassembled VAX code
-runtime/*.asm
-runtime/*.lst
-runtime/*.html
-*.asm
+vax-bin/*.asm
+vax-bin/*.lst
+vax-bin/*.html
+*.disasm
 *.lst
 *.html
+*.raw
 
 # coverage analysis
 *.gcda

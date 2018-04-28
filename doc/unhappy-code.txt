@@ -9,6 +9,20 @@ Some of these have been fixed now.
 ------------------------------------------------------------------------------
 
 
+Operand decoding, fragments, fragment groups
+---
+Now that I have written uop.c, I can see that the current tables lead to clumsy
+instruction decoding.  But the tables are almost right for pretty decoding, so
+that's something I can change for v0.2.
+
+Currently, class and label returns are overloaded into a single integer when
+returned from op_sim().  It is also necessary to test the fragment value for
+FRAG_ADDR (and FRAG_ERR).
+
+This should be a really simple change.
+
+
+
 Makefile, AFL
 ---
 Tab completion doesn't work well with the current choice of names for AFL related
@@ -43,6 +57,21 @@ This gets ugly quickly with GNU Make, especially combined with #include file
 dependency checks.
 
 Meson will probably solve this problem.
+
+
+
+Makefile is too slow (DEP macro)
+---
+I don't want to fiddle with include file dependencies in the makefile.  I chose
+the easy way out, to use a macro that generates the dependencies automatically.
+It doesn't cache the results and the macro is used a lot so it takes a bit to
+run make because it needs to expand all the DEP macro invocations before it
+can start doing its real job.
+
+Meson will solve it but what do I do in the meantime?
+
+I actually have code that does caching (just like kbuild in Linux) but I'd
+rather not have to use it.
 
 
 
@@ -111,6 +140,10 @@ instr.pl is longer than I would prefer but it is really easy to read.
 
 Perl regexes -- many of them end up being too long/terse.  Should probably look
 into using /x and some whitespcae.
+
+[src/uops.spec exists now and src/uasm.pl has been partially rewriten.  It is
+a lot cleaner and somewhat smaller now.  I still wish it could be even smaller
+and cleaner, though.]
 
 
 
@@ -243,6 +276,7 @@ doesn't know a thing about the rest of the simulator, except for some of the
 µops and of course the registers/flags.
 
 
+
 Width, as # of bytes, as enum, as #defines
 ---
 I started out using #defines, then changed it to an enum (much better).  But I
@@ -257,6 +291,185 @@ More will be needed once/if octowords and floating-point gets supported natively
 The internals in the assembler/disasssembler/simulator should use no of bytes,
 unless (in the simulator) it feels very natural to use the enum.
 
+op_width[op][i] uses an integer number of bytes.
+
+Should 'enum width' only be used in ucode[] in src/vax-ucode.h?
+
+There is always the option of wrapping enum width in a struct to prevent accidentally
+mixing it up with an int.
+
+
+
+Operand strings for instruction
+---
+src/vax-instr.h contains the array ops[] of strings that describes the operands
+for each instruction.
+
+For example:
+  CASEB		"rb rb rb "
+  CASEW		"rw rw rw "
+  CASEL		"rl rl rl "
+  BNEQ          "bb "
+  MOVQ          "rq wq "
+  PUSHL		"rl "
+
+
+Would be nice if there was also an array with the full description DEC used
+internally.
+
+The same examples:
+  CASEB		"selector.rb, base.rb, limit.rb, displ[0].bw, ..., displ[limit].bw"
+  CASEW		"selector.rw, base.rw, limit.rw, displ[0].bw, ..., displ[limit].bw"
+  CASEL		"selector.rl, base.rl, limit.rl, displ[0].bw, ..., displ[limit].bw"
+  BNEQ		"displ.bb"
+  MOVQ		"src.rq, dst.wq"
+  PUSHL		"src.rl, {-(SP).wl}"
+
+
+For the CASE instructions, the number of word-sized displacements (the size of
+the jump table) is determined by the third operand (limit).  It's 'limit'+1.
+
+Would perhaps also be nice to specify whether an operand is signed or unsigned.
+CASE's first three operands are unsigned, for example.
+
+At the moment we lose both the operand name and any implicit operands such as
+the second operand of PUSHL and the fourth and forth operands of CASE.
+
+
+
+Sign/zero extension
+---
+op_sim/op_dis have to read and extend integer operands.  Operands are almost
+always signextended but there are a few exceptions where zero extension is
+desired... I think.
+
+The first three operands of CASEB/CASEW/CASEL are not extended to 32 bits.
+The best way to emulate that is to use zero extension.   For now, this is
+hardcoded in the disassembler.
+
+
+
+Supporting different instruction set subsets
+---
+dis should definitely support the full instruction set!
+asm should probably support the full instruction set!
+
+sim doesn't have to support the full instruction set -- and it definitely
+shouldn't until all the microcode has been written.
+
+Would be nice if it were possible to compile once and switch between subsets
+at run-time.  Also between different microcode implementations.
+
+
+Examples of subsets:
+ - no floating-point instructions at all -- they all trap to emulation code.
+ - floating-point instructions via microcode through the standard 32-bit
+   datapath, probably using a few new µops.
+ - floating-point instructions via µops that target a specialized fp-datapath.
+ - with or without EDITPC.  If not present, they will trap to emulation.
+ - with or without packed decimal support.  If not preset, they will trap to
+   emulation.
+ - with or without vector instructions.  If not present, they will trap as
+   reserved instructions.
+ - with or without some of the string (block) instructions.  If not present,
+   they will trap to emulation.
+
+There are three kinds of traps involved:
+ - reserved instructions (for vector instructions)
+ - floating-point instructions
+ - emulated instructions (non-fp instructions like EDITPC, packed decimal,
+   string instructions)
+
+
+
+Buffer index check when encoding/decoding instructions
+---
+The code in asm.c and dis.c that stores instruction bytes to and reads instruc-
+tion bytes from arrays (blob[] in both cases) is seriously ugly.  It's likely
+also a bit slow.
+
+This problem was solved quite nicely for normal operands using a b[MAX_OPLEN]
+array passed into/out of op_asm/op_dis.
+
+Perhaps a similar solution should be used in asm.c/dis.c -- and of course
+also sim.c?
+
+b[MAX_INSTRLEN], where MAX_INSTRLEN would be something like max-opcode-len (2) +
+max-operand-cnt (6) * max-operand-len (17) so 104.  This is almost double the
+true max instruction length but it would probably make the code cleaner.
+
+
+
+#include file madness
+---
+There are too many include files -- and they each include too much stuff.
+It should be able to refactor things to make them better.
+
+Generated files don't always have include guards.
+
+
+
+Machine-generated tables
+---
+precisely which tables are necessary?
+precisely what should their names be?  the current names are somewhat unsystematic.
+should they be distributed to header files in the same way as now, or should
+they be a bit more fine-grained?
+
+Should the types and #defines that are currently in the machinegenerated files
+still be there or could they be put into normal #include files?
+
+
+
+Operands with an opspec and 'bb'/'bw'
+---
+Almost all operands have an operand and are handled by the machine generated
+code in op-asm.h/op-dis.h/op-sim.h/op-val.h based on src/operands.spec.
+
+And then there are the branches...  They don't use machine generated code at
+all.  It feels a bit like they are tacked on to a well-designed machine.
+
+Can they be integrated better somehow?
+
+
+
+Operand validation
+---
+There are some opspecs that are invalid -- and of course their corresponding
+textual representation would also be invalid.  But op-val is currently used in
+both encoding (op-asm) and decoding (op-dis, op-sim).  It would also be nice if
+the simulator could check for the legality of an operand while the disassembler
+could still kinda/sorta disassemble the operand even if though it is reserved.
+
+Should all this be done by a single validation routine that only looks at the
+binary representation of the opspec?
+
+Probably not.
+
+
+
+Multi-line string literals
+---
+They are only used with printf()-like functions.  My standard method has for
+years been to use string concatenation in the C preprocessor to help me.
+I would write one string literal per line:
+
+  fprintf(stderr,
+"Lorem ipsum dolor sit amet, consectetur adipiscing elit.\n"
+"Integer et nulla sed nulla efficitur sodales.\n"
+"Praesent vitae varius nunc. Cras non orci eu leo imperdiet consequat.\n"
+"Nam et faucibus tortor.\n");
+
+I recently learned an alternative:
+
+  fprintf(stderr, "\
+Lorem ipsum dolor sit amet, consectetur adipiscing elit.\n\
+Integer et nulla sed nulla efficitur sodales.\n\
+Praesent vitae varius nunc. Cras non orci eu leo imperdiet consequat.\n\
+Nam et faucibus tortor.\n\
+");
+
+I don't think I prefer it.
 
 ------------------------------------------------------------------------------
 

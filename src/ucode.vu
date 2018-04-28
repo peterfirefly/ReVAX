@@ -256,6 +256,7 @@
 
 
 -resop:
+	nop
 	---
 
 
@@ -324,17 +325,20 @@
 # bit fields
 -vimm:
 -v1imm:
+	nop
 	---
 
 # assert(size <=u 31)
 # assert((size == 0) || (pos <=u 31)) // pos not checked iff size = 0
 -vregread:
 -v1regread:
+	nop
 	---
 
 -vmemread:
 -v1memread:
 -v1memreadi:
+	nop
 	---
 
 -vregwrite:
@@ -342,6 +346,7 @@
 -vmemwrite:
 -v1memwrite:
 -v1memwritei:
+	nop
 	---
 
 
@@ -470,12 +475,12 @@
 	ld	[t0], <pre>	-- 32
 	---
 
-# branch operands -- all branches except CASE
+# relative branch operands -- all branches except CASE
+# the decoder sign extends the byte/word displacement before putting it in <imm>
 -branch:
 	imm	<imm>, t0
 	readpc	t1
-	add	t0, t1, t0	-- 32 µ
-	jmp	t0
+	add	t0, t1, <pre>	-- 32 µ
 	---
 
 
@@ -771,6 +776,8 @@ BCS:	# BLSSU:
 	---
 
 JMP:
+BRB:
+BRW:
 -br:
 	jmp	<pre>
 	---
@@ -780,25 +787,36 @@ JMP:
 # Branch on Low Bit (Clear|Set)
 BLBC:
 BLBS:
+	nop
+	---
 
 # Branch on Bit (Clear|Set)
 BBC:
 BBS:
+	nop
+	---
 
 # Branch on Bit Clear and Set
 BBCS:
+	nop
+	---
 
 # Branch on Bit Set and Clear
 BBSC:
+	nop
+	---
 
 # Branch on Bit Clear and Clear [Interlocked]
 BBCC:
 BBCCI:
+	nop
+	---
 
 # Branch on Bit Set and Set [Interlocked]
 BBSS:
 BBSSI:
-
+	nop
+	---
 
 ##
 
@@ -828,19 +846,26 @@ RSB:
 ACBB:
 ACBW:
 ACBL:
+	nop
+	---
 
 # Add One and Branch if LEQ (<=)
 AOBLEQ:
+	nop
+	---
 
 # Add One and Branch if LSS (<)
 AOBLSS:
-
+	nop
+	---
 # Subtract One and Branch if GEQ (>=)
 SOBGEQ:
-
+	nop
+	---
 # Subtract One and Branch if GTR (>)
 SOBGTR:
-
+	nop
+	---
 
 ##
 
@@ -874,8 +899,11 @@ CASEL:
 
 CALLS:
 CALLG:
+	nop
+	---
 RET:
-
+	nop
+	---
 
 #####
 #
@@ -887,25 +915,33 @@ INSQTI:
 REMQUE:
 REMQHI:
 REMQTI:
-
+	nop
+	---
 
 ####
 #
 # BITFIELDS
 
 CMPV:
+	nop
 	---
 CMPZV:
+	nop
 	---
 EXTV:
+	nop
 	---
 EXTZV:
+	nop
 	---
 INSV:
+	nop
 	---
 FFC:
+	nop
 	---
 FFS:
+	nop
 	---
 
 
@@ -924,6 +960,59 @@ MOVC5:
 #SCANC:
 #SKPC:
 #SPANC:
+
+
+
+####
+#
+# Floating-point
+
+ADDF2:
+ADDF3:
+SUBF2:
+SUBF3:
+MULF2:
+MULF3:
+DIVF2:
+DIVF3:
+	nop
+	---
+
+ADDD2:
+ADDD3:
+SUBD2:
+SUBD3:
+MULD2:
+MULD3:
+DIVD2:
+DIVD3:
+	nop
+	---
+
+ADDG2:
+ADDG3:
+SUBG2:
+SUBG3:
+MULG2:
+MULG3:
+DIVG2:
+DIVG3:
+	nop
+	---
+
+#ADDH2:
+#ADDH3:
+#SUBH2:
+#SUBH3:
+#MULH2:
+#MULH3:
+#DIVH2:
+#DIVH3:
+#	nop
+#	---
+
+
+
 
 
 ####
@@ -964,9 +1053,11 @@ INDEX:
 
 
 MOVPSL:
+	nop
 	---
 
 NOP:
+	nop	# ;)
 	---
 
 POPR:

@@ -297,37 +297,13 @@ static void decode(struct cpu *cpu, int *uop_cnt, struct uop uop[])
 /***/
 
 
-/* Sign extend to 32 bits.  The sign extension compiles down to two different
-   single instructions on x86, depending on whether we are going from 8 or 16 bits.
-
-   'static' makes it inlineable (ELF/gnu make public symbols overrideable at
-   run-time which means that public functions can't be inlined).  This should
-   get us down to a single instruction in many cases.
- */
-static int32_t signext(int32_t x, int len)
-{
-	switch (len) {
-	case U_WIDTH_8:
-		/* two-casts-in-a-row trick :) */
-		return (int32_t)(int8_t) x;
-	case U_WIDTH_16:
-		return (int32_t)(int16_t) x;
-	case U_WIDTH_32:
-		return x;
-	default:
-		/* U_LEN_WIDTH + illegal len values */
-		UNREACHABLE();
-	}
-}
-
-
 /* data width for uop */
 static int uop_width(int len)
 {
 	switch (len) {
-	case U_WIDTH_8 :	return 1;
-	case U_WIDTH_16:	return 2;
-	case U_WIDTH_32:	return 4;
+	case UW_8 :	return 1;
+	case UW_16:	return 2;
+	case UW_32:	return 4;
 	default:
 		UNREACHABLE();
 	}
@@ -352,136 +328,6 @@ static int match_cc(int flags, int cc)
 	case 15: /* BLSSU <  unsigned */  return   C(flags);
 	default:
 		UNREACHABLE();
-	}
-}
-
-
-static void result(struct cpu *cpu, struct uop u, int32_t x, int w)
-{
-	switch (w) {
-	case U_WIDTH_8:
-		cpu->r[u.dst] = (cpu->r[u.dst] & 0xFFFFFF00) | (x &   0xFF);
-#if 0
-		nzvc = ...
-#endif
-		break;
-	case U_WIDTH_16:
-		cpu->r[u.dst] = (cpu->r[u.dst] & 0xFFFF0000) | (x & 0xFFFF);
-#if 0
-		nzvc = ...
-#endif
-		break;
-	case U_WIDTH_32:
-		cpu->r[u.dst] = x;
-#if 0
-		nzvc = ...
-#endif
-		break;
-	default:
-		UNREACHABLE();
-	}
-}
-
-
-/*
-   Exceptions:
-     INTO, DIV0
-
-   Neither is actually raised by alu().  They are just reported and may or may
-   not lead to an actual exception.  In both cases, the result actually gets
-   written to reg/mem, i.e., the µpost flow actually runs.
-
-   Perhaps the best way to handle this is to have yet another bitfield somewhere,
-   that indicates the requested exceptions?
-
-   I first thought that returning an exception indication or passing a reference
-   to a bitmask into alu() would be good ideas.  I now think it's better to
-   add a field to struct cpu.
- */
-static void alu(struct cpu *cpu, struct uop u)
-{
-	uint32_t	old_NZVC;
-
-	old_NZVC = cpu->psl[u.flags] & 0xF;
-
-	switch (u.op) {
-	/* compare */
-	case U_CMP:
-		printf("%s, %s  -- %s %s",
-			regstr(u.s1).str, regstr(u.s2).str, lenstr(u.width), flagstr(u.flags));
-		break;
-
-
-	/* add/sub */
-	case U_ADD:
-		result(cpu, u, cpu->r[u.s1] + cpu->r[u.s2], u.width);
-		break;
-	case U_SUB:
-		result(cpu, u, cpu->r[u.s1] - cpu->r[u.s2], u.width);
-		break;
-	case U_ADC:
-		cpu->r[u.dst] = cpu->r[u.s1] + cpu->r[u.s2] + C(cpu->psl[u.flags]);
-		break;
-	case U_SBB:
-		cpu->r[u.dst] = cpu->r[u.s1] - cpu->r[u.s2] - C(cpu->psl[u.flags]);
-		break;
-
-
-	/* logic */
-	case U_AND:
-		cpu->r[u.dst] = cpu->r[u.s1] & cpu->r[u.s2];
-		break;
-	case U_BIC: /* AND NOT */
-		cpu->r[u.dst] = cpu->r[u.s1] &~cpu->r[u.s2];
-		break;
-	case U_BIS: /* OR */
-		cpu->r[u.dst] = cpu->r[u.s1] | cpu->r[u.s2];
-		break;
-	case U_XOR:
-		cpu->r[u.dst] = cpu->r[u.s1] ^ cpu->r[u.s2];
-		break;
-
-
-	/* "barrell shifter" */
-	case U_ASHL:
-		cpu->r[u.dst] = cpu->r[u.s1] << cpu->r[u.s2];
-		break;
-	case U_ROTL:
-//		cpu->r[u.dst] = cpu->r[u.s1] << cpu->r[u.s2];
-		break;
-
-
-	/* MUL/DIV */
-	case U_MUL:
-		cpu->r[u.dst] = cpu->r[u.s1] * cpu->r[u.s2];
-		break;
-	case U_DIV:
-		cpu->r[u.dst] = cpu->r[u.s1] / cpu->r[u.s2];
-		break;
-
-	/* no explicit operands, always set arch flags */
-	case U_EMUL:
-		printf("p1, p2, p3, e2'e1");
-		break;
-
-	case U_EDIV:
-		printf("p1, p3'p2, p4, e1, e2");
-		break;
-	}
-
-	/* overflow?
-
-	   INTO is edge-triggered on the architectural V flag... and only if
-	   we observe the edge while PSL<5> is set.
-
-	   Popping a PSL value can also lead to INTO?  FIXME
-	   In any case, that is not handled here.
-
-           Use a temporary so we can detect V changes.
-	 */
-	if ((u.flags == 0) &&
-	    (cpu->psl[0] & (1 << 5)) && (V(cpu->psl[0]) != V(old_NZVC))) {
-		/* INTO! */
 	}
 }
 
@@ -560,13 +406,13 @@ static int datapath(struct cpu *cpu, int uop_cnt, struct uop uop[uop_cnt])
 		case U_MOV:
 			/* merge src and src' according to len */
 			switch (u.width) {
-			case U_WIDTH_8:
+			case UW_8:
 				cpu->r[u.dst] = (cpu->r[u.s1] & 0xFFFFFF00) | (cpu->r[u.s2] &    0xFF);
 				break;
-			case U_WIDTH_16:
+			case UW_16:
 				cpu->r[u.dst] = (cpu->r[u.s1] & 0xFFFFFF00) | (cpu->r[u.s2] & 0xFFFF);
 				break;
-			case U_WIDTH_32:
+			case UW_32:
 				cpu->r[u.dst] = cpu->r[u.s1];
 				break;
 			default:
@@ -601,9 +447,9 @@ static int datapath(struct cpu *cpu, int uop_cnt, struct uop uop[uop_cnt])
 			}
 
 			switch (u.width) {
-			case U_WIDTH_8:
-			case U_WIDTH_16:
-			case U_WIDTH_32:
+			case UW_8:
+			case UW_16:
+			case UW_32:
 				cpu->r[u.dst] = signext(tmp, u.width);
 				break;
 			}
@@ -619,9 +465,9 @@ static int datapath(struct cpu *cpu, int uop_cnt, struct uop uop[uop_cnt])
 			int		err;
 
 			switch (u.width) {
-			case U_WIDTH_8:
-			case U_WIDTH_16:
-			case U_WIDTH_32:
+			case UW_8:
+			case UW_16:
+			case UW_32:
 				tmp = cpu->r[u.dst];
 				break;
 			}
@@ -846,8 +692,38 @@ static void cpu_program(struct cpu *cpu)
 }
 
 
-int main()
+static void help()
 {
+		fprintf(stderr,
+"revax-sim <binary>\n"
+"\n"
+"  inputs a VAX binary (raw or a.out) and runs it.\n");
+}
+
+
+static void help_exit()
+{
+	help();
+	exit(1);
+}
+
+
+int main(int argc, char *argv[])
+{
+	/* parse command line */
+
+	if (argc != 2)
+		help_exit();
+
+	if (strcmp(argv[1], "--version") == 0) {
+		printf("revax-sim %s (commit %s)\n", VERSION, GITHASH);
+		printf("compiled %s on %s with %s.\n", NOW, PLATFORM, CCVER);
+		printf("\n");
+		printf("  %s\n", REVAXURL);
+
+		exit(0);
+	}
+
 	struct cpu	cpu;
 
 	/* disable stdout buffering so we still get output in case of seg faults */
@@ -857,6 +733,7 @@ int main()
 	mem_init(&cpu, 512 * 1024 * 1024);
 	cpu_program(&cpu);
 	cpu_run(&cpu);
-}
 
+	return EXIT_SUCCESS;
+}
 

@@ -4,7 +4,24 @@
 
  */
 
-static void dis_uinstr(int i, int uop_cnt, struct uop ucode[])
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
+#include "macros.h"
+
+#include "vax-instr.h"
+#include "vax-ucode.h"
+
+
+#define DIS_STOP	true
+#define DIS_CONT	false
+
+/* disassemble uop_cnt µops from ucode[] starting at index i.
+
+   perhaps stop at "---" (when 'last' flag is set).
+ */
+static void dis_uinstr(int i, int uop_cnt, bool stop, struct uop ucode[])
 {
 	while (uop_cnt--) {
 		struct uop	u = ucode[i];
@@ -26,7 +43,10 @@ static void dis_uinstr(int i, int uop_cnt, struct uop ucode[])
 
 		if (uop[u.op].fields & UF_IMM) {
 			if (fields) p += sprintf(p, ", ");
-			p += sprintf(p, "0x%04X_%04X", SPLIT(u.imm));
+			if (u.imm == U_IMM_IMM)
+				p += sprintf(p, "<imm>");
+			else
+				p += sprintf(p, "0x%04X_%04X", SPLIT(u.imm));
 			fields++;
 		}
 
@@ -89,8 +109,11 @@ static void dis_uinstr(int i, int uop_cnt, struct uop ucode[])
 		}
 
 		printf("%s\n", buf);
-		if (u.last)
+		if (u.last) {
 			printf("       ───\n");
+			if (stop)
+				break;
+		}
 
 		i++;
 	}

@@ -40,7 +40,7 @@
    Parsing is transactional: start a transaction with begin(), end/abort it with
    commit()/rollback().
  */
-static const char	*nextp;
+static const char	*nextp;		/* FIXME rename to parse_xxxx */
        bool		 parse_ok;
 
 static unsigned	 	 parse_sp;
@@ -277,59 +277,6 @@ bool parse_int(int *x)
 		}
 
 		*x = tmp;
-		return true;
-	} else {
-		parse_ok = false;
-		return false;
-	}
-}
-
-
-/* decimal -- or binary/octal/hex with 0b/0/0x prefixes
-
-   FIXME  num8, num16, num32, num64?
- */
-bool parse_num(int64_t *x)
-{
-	if (!parse_ok)
-		return false;
-
-	parse_skipws();
-	if (isdigit(*nextp)) {
-		const char	*start = nextp;
-
-		/* [0-9a-fA-F][0-9a-fA-F_]*
-
-		   FIXME  _ in numbers
-		 */
-
-
-		nextp++;
-
-		/* [0-9]* */
-		while (isdigit(*nextp))
-			nextp++;
-
-		int	len = nextp - start;
-		char	*p = malloc(len+1);
-		char	*end;
-
-		/* FIXME use a loop, don't copy '_' */
-		memcpy(p, start, len);
-		p[len] = '\0';
-
-		/* FIXME replace strtoull() with something handwritten that
-		   works on 64-bit values.
-		 */
-		errno = 0;
-		*x = strtoull(p, &end, 16);
-		free(p);
-
-		if (((uint64_t) *x == ULONG_MAX) && (errno == ERANGE)) {
-			parse_ok = false;
-			return false;
-		}
-
 		return true;
 	} else {
 		parse_ok = false;

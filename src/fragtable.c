@@ -67,7 +67,10 @@ int main()
 "#ifndef VAX_FRAGLISTS__H\n"
 "#define VAX_FRAGLISTS__H\n"
 "\n"
-"unsigned frag_list[512][6] = {\n", time_str);
+"#define GROUP_BRANCH\t%d\n"
+"\n"
+"unsigned frag_list[512][6] = {\n", time_str, fraggrp("bb/bw"));
+
 	for (unsigned op=0; op<512; op++) {
 		if (op == 0) {
 			printf("/* single-byte opcodes */\n");
@@ -107,7 +110,7 @@ int main()
 	printf("};\n");
 	printf(
 "\n"
-"#endif VAX_FRAGLISTS__H\n"
+"#endif /* VAX_FRAGLISTS__H */\n"
 "\n");
 	return EXIT_SUCCESS;
 }

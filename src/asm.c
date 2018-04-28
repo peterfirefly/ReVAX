@@ -10,6 +10,11 @@
      instruction (or pseudo-instruction), reads the operands with a combinator
      parser.
 
+     Would be a lot cooler if it had a symbol table...
+
+     Sorely needs better error reporting.
+
+     Doesn't support expressions in operands :(
  */
 
 #include <assert.h>
@@ -39,49 +44,39 @@
 
 /***/
 
-uint32_t	org;
+uint32_t	addr;		/* address we are assembling to */
+unsigned	blob_idx;	/* the next index in blob[] to store to */
 uint8_t		blob[1024];	/* FIXME: far too small */
+bool		first = true;	/* .org only allowed as first (pseudo) instr */
 
-enum { FMT_VAX, FMT_SANE } format = FMT_SANE;
+enum { FMT_VAX, FMT_SANE } format = FMT_VAX;
 
 
-void read_lit()
+bool pseudo_instr(int lineno)
 {
-}
+	struct big_int	big;
 
-
-bool pseudo_op(int lineno)
-{
-	int64_t		x;
+	/* FIXME allow uppercase */
+	/* FIXME allow operand lists for .byte/.word/.long/.quad/.octo */
+	/* FIXME .ffloat/.dfloat/.gfloat/.hfloat */
+	/* FIXME .ascii and friends */
+	/* FIXME .blkx */
+	/* FIXME .mask */
 
 	parse_begin();
 	parse_symbol(".org");
 	parse_ws();
-	parse_num(&x);
+	parse_bigint(&big, 4);
 	parse_eof();
 	if (parse_ok) {
 		parse_commit();
-		/* ... */
-		return true;
-	}
-	parse_rollback();
 
-	parse_begin();
-	parse_symbol(".vax");
-	parse_eof();
-	if (parse_ok) {
-		parse_commit();
-		format = FMT_VAX;
-		return true;
-	}
-	parse_rollback();
+		if (!first) {
+			fprintf(stderr, "line %d: .org not first (pseudo) instruction\n", lineno);
+			return false;
+		}
 
-	parse_begin();
-	parse_symbol(".sane");
-	parse_eof();
-	if (parse_ok) {
-		parse_commit();
-		format = FMT_SANE;
+		addr = big.val[0];
 		return true;
 	}
 	parse_rollback();
@@ -89,14 +84,14 @@ bool pseudo_op(int lineno)
 	parse_begin();
 	parse_symbol(".byte");
 	parse_ws();
-	parse_num(&x);
+	parse_bigint(&big, 1);
 	parse_eof();
 	if (parse_ok) {
 		parse_commit();
-		if ((x < -128) || (x > 255)) {
-			fprintf(stderr, "line %d: number out of range", lineno);
-			return false;
-		}
+
+		blob[blob_idx++] = BYTE(big.val[0], 0);
+
+		addr += 1;
 		return true;
 	}
 	parse_rollback();
@@ -104,14 +99,15 @@ bool pseudo_op(int lineno)
 	parse_begin();
 	parse_symbol(".word");
 	parse_ws();
-	parse_num(&x);
+	parse_bigint(&big, 2);
 	parse_eof();
 	if (parse_ok) {
 		parse_commit();
-		if ((x < -32768) || (x > 65536)) {
-			fprintf(stderr, "line %d: number out of range", lineno);
-			return false;
-		}
+
+		blob[blob_idx++] = BYTE(big.val[0], 0);
+		blob[blob_idx++] = BYTE(big.val[0], 1);
+
+		addr += 2;
 		return true;
 	}
 	parse_rollback();
@@ -119,14 +115,16 @@ bool pseudo_op(int lineno)
 	parse_begin();
 	parse_symbol(".long");
 	parse_ws();
-	parse_num(&x);
+	parse_bigint(&big, 4);
 	parse_eof();
 	if (parse_ok) {
 		parse_commit();
-		if ((x < -128) || (x > 255)) {
-			fprintf(stderr, "line %d: number out of range", lineno);
-			return false;
-		}
+
+		blob[blob_idx++] = BYTE(big.val[0], 0);
+		blob[blob_idx++] = BYTE(big.val[0], 1);
+		blob[blob_idx++] = BYTE(big.val[0], 2);
+		blob[blob_idx++] = BYTE(big.val[0], 3);
+		addr += 4;
 		return true;
 	}
 	parse_rollback();
@@ -134,10 +132,55 @@ bool pseudo_op(int lineno)
 	parse_begin();
 	parse_symbol(".quad");
 	parse_ws();
-	parse_num(&x);
+	parse_bigint(&big, 8);
 	parse_eof();
 	if (parse_ok) {
 		parse_commit();
+
+		blob[blob_idx++] = BYTE(big.val[0], 0);
+		blob[blob_idx++] = BYTE(big.val[0], 1);
+		blob[blob_idx++] = BYTE(big.val[0], 2);
+		blob[blob_idx++] = BYTE(big.val[0], 3);
+
+		blob[blob_idx++] = BYTE(big.val[1], 0);
+		blob[blob_idx++] = BYTE(big.val[1], 1);
+		blob[blob_idx++] = BYTE(big.val[1], 2);
+		blob[blob_idx++] = BYTE(big.val[1], 3);
+
+		addr += 8;
+		return true;
+	}
+	parse_rollback();
+
+	parse_begin();
+	parse_symbol(".octo");
+	parse_ws();
+	parse_bigint(&big, 16);
+	parse_eof();
+	if (parse_ok) {
+		parse_commit();
+
+		blob[blob_idx++] = BYTE(big.val[0], 0);
+		blob[blob_idx++] = BYTE(big.val[0], 1);
+		blob[blob_idx++] = BYTE(big.val[0], 2);
+		blob[blob_idx++] = BYTE(big.val[0], 3);
+
+		blob[blob_idx++] = BYTE(big.val[1], 0);
+		blob[blob_idx++] = BYTE(big.val[1], 1);
+		blob[blob_idx++] = BYTE(big.val[1], 2);
+		blob[blob_idx++] = BYTE(big.val[1], 3);
+
+		blob[blob_idx++] = BYTE(big.val[2], 0);
+		blob[blob_idx++] = BYTE(big.val[2], 1);
+		blob[blob_idx++] = BYTE(big.val[2], 2);
+		blob[blob_idx++] = BYTE(big.val[2], 3);
+
+		blob[blob_idx++] = BYTE(big.val[3], 0);
+		blob[blob_idx++] = BYTE(big.val[3], 1);
+		blob[blob_idx++] = BYTE(big.val[3], 2);
+		blob[blob_idx++] = BYTE(big.val[3], 3);
+
+		addr += 16;
 		return true;
 	}
 	parse_rollback();
@@ -146,62 +189,26 @@ bool pseudo_op(int lineno)
 }
 
 
-bool read_vax_op(int lineno, char access, char type, uint8_t buf[17], unsigned *sze)
-{
-	(void) lineno;
-	(void) access, (void) type, (void) buf, (void) sze;
 
-	return true;
-}
-
-
-bool read_sane_op(int lineno, char access, char type, uint8_t buf[17], unsigned *sze)
-{
-	(void) access, (void) type;
-	(void) lineno, (void) buf, (void) sze;
-
-	/* immediates		-- 6-bit or 8F			*/
-	/* absolute		-- [#addr]			*/
-	/* register		-- r0..r15, ap, fp, sp, pc	*/
-	/* register def		-- [reg]			*/
-	/* autodec		-- [--reg]			*/
-	/* autoinc		-- [reg++]			*/
-	/* autoinc def		-- [[reg++]]			*/
-	/* b/w/l disp		-- [reg +/- disp]		*/
-	/* b/w/l disp def	-- [[reg +/- disp]]		*/
-
-	/* absolute idx		-- [#addr + reg]		*/
-	/* register def idx	-- [reg + reg], [reg + reg*sze] */
-	/* autodec idx		-- */
-	/* autoinc idx		-- */
-	/* autoinc def idx	-- */
-	/* b/w/l disp idx	-- */
-	/* b/w/l disp def idx	-- */
-
-	return false;
-}
-
-
-/* Parse operand, check if it's legal for the this part of the instruction.
-   The largest possible operand is 1 opspec + 16 bytes for an octoword int or
-   an h floating-point type.
-
-   access:  r/w/m/a
-   type:    b/w/l/q/o   f/d/g/h
-
-   Parses using either VAX or SANE operand format.
-   Bruteforce implementation: simply tries parsing one format after another
-   until there is a match.
- */
-bool read_op(int lineno, char access, char type, uint8_t buf[17], unsigned *sze)
+int read_op(uint8_t b[MAX_OPLEN], uint32_t addr, int width, enum ifp ifp)
 {
 	switch (format) {
 	case FMT_VAX:
-		return read_vax_op( lineno, access, type, buf, sze);
+		{
+			int cnt = op_asm_vax(b, addr, width, ifp);
+			if ((cnt > 0) && !op_val(b, width))
+				return -1;
+			return cnt;
+		}
 	case FMT_SANE:
-		return read_sane_op(lineno, access, type, buf, sze);
+		{
+			int cnt = op_asm_sane(b, addr, width, ifp);
+			if ((cnt > 0) && !op_val(b, width))
+				return -1;
+			return cnt;
+		}
 	default:
-		assert(0);
+		UNREACHABLE();
 	}
 }
 
@@ -223,12 +230,12 @@ bool read_line(FILE *f, int lineno)
 		if (feof(f))
 			return 0;
 		perror("fgets()");
-		fprintf(stdout, "line %d: error reading input file.\n", lineno);
+		fprintf(stderr, "line %d: error reading input file.\n", lineno);
 		return false;
 	}
 
 	/* cut off line comment, if any */
-	/* FIXME we should ignore ; inside "..." and '' */
+	/* FIXME we should ignore ; inside "" and '' */
 	if (strchr(line, ';'))
 		*strchr(line, ';') = '\0';
 
@@ -252,7 +259,7 @@ bool read_line(FILE *f, int lineno)
 
 		/* there is no leading space -- so we can start immediately */
 		if (!isalnum(*p)) {
-			fprintf(stdout, "line %d: label expected.\n", lineno);
+			fprintf(stderr, "line %d: label expected.\n", lineno);
 			return false;
 		}
 
@@ -297,9 +304,11 @@ bool read_line(FILE *f, int lineno)
 
 	parse_init(line);
 
-	/* pseudoops */
-	if (pseudo_op(lineno))
+	/* pseudo instruction */
+	if (pseudo_instr(lineno)) {
+		first = false;
 		return true;
+	}
 
 	/* instruction name + possible list of operands */
 	parse_begin();
@@ -311,43 +320,174 @@ bool read_line(FILE *f, int lineno)
 	}
 	parse_commit();
 
+	/* upper-case mnemonic */
+	for (unsigned i=0; instrname[i]; i++)
+		instrname[i] = toupper(instrname[i]);
+
 	/* FIXME a tree or hash for faster lookups -- should probably be generated
                  by instr.pl.
-
-           FIXME case folding.
 	 */
 	int	ino;
-	for (ino=0; ino < 512; ino++) {
-		if (strcmp(instrname, mne[ino]) == 0) {
-			if (ino < 256)
-				fprintf(stderr, "%-6s  %02X\n", instrname, ino);
-			else
-				fprintf(stderr, "%-6s  FD %02X\n", instrname, ino & 0xFF);
+	for (ino=0; ino < 512; ino++)
+		if (strcmp(instrname, mne[ino]) == 0)
+			goto found_instr;
+	for (unsigned i=0; i < ARRAY_SIZE(syn); i++) {
+		if (strcmp(instrname, syn[i].name) == 0) {
+			ino = syn[i].op;
 			goto found_instr;
 		}
 	}
+
 	fprintf(stderr, "line %d: '%s' is not an instruction.\n", lineno, instrname);
 	return false;
 
 found_instr:
+	/* ino is the instruction number (0..511).
 
-	/* [a-zA-Z][a-zA-Z0-9]* */
+	   ops[ino] is the ops string ("rf rf mf bw ", for example)
+	   op_cnt[ino] is the number of operands
+	   op_width[ino][] is the operand widths
+	   op_ifp[ino][] is the operand types (int/f/d/g/h)
+	 */
 
-	/* check if operand list matches the instruction
-	     - # of operands
-	     - masks  => only immediates
-	     - branch => can only be immediates
-	     - addr   => can't be registers or immediates
-	     - write operands can't be immediates
-	     - size violations for immediates
+	/* store the opcode */
+	if (blob_idx + 1 + (ino>255) > sizeof(blob)) {
+		fprintf(stderr, "line %d: out of blob space.\n", lineno);
+		return false;
+	}
+	if (ino > 255) {
+		blob[blob_idx++] = 0xFD;
+		addr++;
+	}
+	blob[blob_idx++] = ino & 0xFF;
+	addr++;
 
-           operands have been parsed and turned into opspecs by this point but
-           they haven't been put into the blob yet.  I think.
+	/* parse operands (and store opspecs) */
+	for (unsigned opidx=0; opidx < op_cnt[ino]; opidx++) {
+		if (opidx > 0) {
+			parse_skipws();
+			parse_ch(',');
+		}
 
-           labels are treated as immediates.  At some point they should be
-           handled as expressions -- and still be treated as immediates.
-         */
-	return 1;
+		char	access = ops[ino][opidx*3];
+
+		if (access == 'b') {	/* branch operand */
+			/* bb, bw */
+			switch (ops[ino][opidx*3+1]) {
+			case 'b': {
+				  uint32_t	relative_pc = addr+1;
+				  uint8_t	disp;
+
+				  if (!parse_branch8(&disp, relative_pc)) {
+					fprintf(stderr, "line %d: not a valid byte-sized relative address.\n", lineno);
+					return false;
+				  }
+				  if (blob_idx + 1 > sizeof(blob)) {
+					fprintf(stderr, "line %d: out of blob space.\n", lineno);
+					return false;
+				  }
+				  blob[blob_idx++] = disp & 0xFF;
+				  addr += 1;
+				  break;
+				  }
+			case 'w': {
+				  uint32_t	relative_pc = addr+2;
+				  uint16_t	disp;
+
+				  if (!parse_branch16(&disp, relative_pc)) {
+					fprintf(stderr, "line %d: not a valid word-sized relative address.\n", lineno);
+					return false;
+				  }
+				  if (blob_idx + 2 > sizeof(blob)) {
+					fprintf(stderr, "line %d: out of blob space.\n", lineno);
+					return false;
+				  }
+				  blob[blob_idx++] = disp & 0xFF;
+				  blob[blob_idx++] = disp >> 8;
+				  addr += 2;
+				  break;
+				  }
+			default:
+				UNREACHABLE();
+			}
+
+			/* store byte/word, inc addr */
+		} else {
+			/* normal operand */
+
+			uint8_t	b[MAX_OPLEN];	/* encoded operand */
+
+			/* read_op() is a wrapper around op_asm_xxx() and op_val().
+
+			   op_asm() checks that immediates fit into width.
+			   op_val() checks that registers are valid for width.
+			 */
+			int cnt = read_op(b, addr, op_width[ino][opidx], op_ifp[ino][opidx]);
+			if (cnt <= 0) {
+				fprintf(stderr, "line %d, operand %d: not a valid operand.\n", lineno, opidx+1);
+				return false;
+			}
+
+                        /* verify that access type and operand match */
+			switch (access) {
+			case 'r': /* all operands are valid for read */
+				  break;
+			case 'w':
+			case 'm': /* can't be immediate, lit6 */
+				  if ((b[0] & 0xC0) == 0x00) {
+					fprintf(stderr, "line %d, operand %d: write/modify operands can't be short literals.\n", lineno, opidx+1);
+					return false;
+				  }
+				  if ((b[0] == 0x8F)) {
+				  	fprintf(stderr, "line %d, operand %d: write/modify operands can't be immediates.\n", lineno, opidx+1);
+				  	return false;
+				  }
+				  break;
+			case 'a': /* can't be register, immediate, lit6 */
+				  if ((b[0] & 0xF0) == 0x50) {
+					fprintf(stderr, "line %d, operand %d: address operands can't be registers.\n", lineno, opidx+1);
+					return false;
+				  }
+				  if ((b[0] & 0xC0) == 0x00) {
+					fprintf(stderr, "line %d, operand %d: address operands can't be short literals.\n", lineno, opidx+1);
+					return false;
+				  }
+				  if ((b[0] == 0x8F)) {
+				  	fprintf(stderr, "line %d, operand %d: address operands can't be immediates.\n", lineno, opidx+1);
+				  	return false;
+				  }
+				  break;
+			case 'v': /* can't be lit6 -- immediates are weirdly enough ok */
+				  if ((b[0] & 0xC0) == 0x00) {
+					fprintf(stderr, "line %d, operand %d: bit field operands can't be short literals.\n", lineno, opidx+1);
+					return false;
+				  }
+				  break;
+			default:
+				UNREACHABLE();
+			}
+
+			if (blob_idx + cnt > sizeof(blob)) {
+				fprintf(stderr, "line %d: out of blob space.\n", lineno);
+				return false;
+			}
+			memcpy(blob+blob_idx, b, cnt);
+			blob_idx += cnt;
+			addr     += cnt;
+		}
+	}
+
+	/* verify that that was the end of the instruction = the rest of the line
+	   is empty.
+	 */
+
+	if (!parse_eof()) {
+		fprintf(stderr, "line %d: illegal characters at end of line.\n", lineno);
+		return false;
+	}
+
+	first = false;
+	return true;
 }
 
 
@@ -358,11 +498,12 @@ void asm_file(const char *fname)
 
 	if ((f = fopen(fname, "rb")) == NULL) {
 		perror("fopen()");
-		fprintf(stdout, "can't open input file.\n");
+		fprintf(stderr, "can't open input file.\n");
 		exit(1);
 	}
 
-	org = 0;
+	addr = 0;
+	blob_idx = 0;
 	memset(blob, 0x0, sizeof(blob));
 
 	lineno = 1;
@@ -370,6 +511,10 @@ void asm_file(const char *fname)
 		lineno++;
 
 	fclose(f);
+
+/* FIXME don't create .raw file if there were errors */
+/* FIXME allow more than one error per run */
+
 }
 
 
@@ -379,20 +524,20 @@ void dump_blob(const char *fname)
 
 	if ((f = fopen(fname, "wb")) == NULL) {
 		perror("fopen()");
-		fprintf(stdout, "can't create blob file.\n");
+		fprintf(stderr, "can't create blob file.\n");
 		exit(1);
 	}
 
-	if (fwrite(blob, /* size */ 1, /* nmemb */ org, f) != org) {
+	if (fwrite(blob, /* size */ 1, /* nmemb */ blob_idx, f) != blob_idx) {
 		perror("fwrite()");
-		fprintf(stdout, "can't write blob file.\n");
+		fprintf(stderr, "can't write blob file.\n");
 		fclose(f);
 		exit(1);
 	}
 
 	if (fclose(f) != 0) {
 		perror("fclose()");
-		fprintf(stdout, "can't write blob file (close error).\n");
+		fprintf(stderr, "can't write blob file (close error).\n");
 		fclose(f);
 		exit(1);
 	}
@@ -402,7 +547,7 @@ void dump_blob(const char *fname)
 static void help()
 {
 		fprintf(stderr,
-"asm <source>\n"
+"revax-asm <source>\n"
 "\n"
 "  inputs a VAX assembly file (not in VAX MACRO format -- that would be much\n"
 "  too complicated).\n"
@@ -443,5 +588,7 @@ int main(int argc, char *argv[])
 	dump_blob(outname);
 	free(barename);
 	free(outname);
+
+	return EXIT_SUCCESS;
 }
 

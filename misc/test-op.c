@@ -1081,11 +1081,13 @@ struct test_asm_case asm_vax[] = {
 	{.str="S^#120",		.cnt=1, .b={0x3F}, .width= 8, .ifp=IFP_G},
 	{.str="S^#120",		.cnt=1, .b={0x3F}, .width=16, .ifp=IFP_H},
 
-	/* FIXME fp values that don't fit into lit6 */
+	/* FIXME test fp values that don't fit into lit6 */
 
 	/***/
 
 	/* ints */
+
+	/* FIXME test int values that are too large for byte/word/long/quad/octo */
 
 	{.str="I^#0",		.cnt=2, .b={0x8F, 0x00},	.width=1, .ifp=IFP_INT},
 	{.str="I^#255",		.cnt=2, .b={0x8F, 0xFF},	.width=1, .ifp=IFP_INT},
@@ -1161,6 +1163,7 @@ struct test_asm_case asm_vax[] = {
 	{.str="@(r12)+",	.cnt=1, .b={0x9C}, .width=1, .ifp=IFP_INT},
 
 	/* pcrel/disp */
+	/* FIXME test pcrel8/pcrel16 w/ addresses that are too far away */
 	{.str="B^0xCAFEBB00",	.cnt=2, .b={0xAF, 0x42}, .width=1, .ifp=IFP_INT},
 	{.str="B^100(fp)",	.cnt=2, .b={0xAD, 0x64}, .width=1, .ifp=IFP_INT},
 	{.str="@B^^XCAFEBB00",	.cnt=2, .b={0xBF, 0x42}, .width=1, .ifp=IFP_INT},
@@ -1259,7 +1262,7 @@ struct test_asm_case asm_vax[] = {
 	{.str="L^100000(r3)[r3]",	.cnt=6, .b={0x43,0xE3, 0xA0,0x86,0x01,0x00}, .width=1, .ifp=IFP_INT},
 	{.str="@L^100000(r3)[r3]",	.cnt=6, .b={0x43,0xF3, 0xA0,0x86,0x01,0x00}, .width=1, .ifp=IFP_INT},
 
-	/* pc is not alloed as index register */
+	/* pc is not allowed as index register */
 	{.str="(r2)[pc]",		.cnt=-1, .width=1, .ifp=IFP_INT},
 	{.str="-(r2)[pc]",		.cnt=-1, .width=1, .ifp=IFP_INT},
 	{.str="(r2)+[pc]",		.cnt=-1, .width=1, .ifp=IFP_INT},
@@ -1295,7 +1298,7 @@ void test_asm()
 
 		parse_init(asm_vax[tst].str);
 		bytes = op_asm_vax(b, 0xCAFEBABE, asm_vax[tst].width, asm_vax[tst].ifp);
-		/* FIXME parse_ok? */
+		/* FIXME parse_ok? parse_eof()? */
 		parse_done();
 
 		valid = (bytes != -1) ? op_val(b, asm_vax[tst].width) : false;

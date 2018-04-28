@@ -306,7 +306,7 @@ sub compress_ops()
 }
 
 
-my %data_types = (
+my %type_width = (
         'b'     =>  1,
         'w'     =>  2,
         'l'     =>  4,
@@ -319,12 +319,34 @@ my %data_types = (
         'h'     => 16,
 );
 
+
+my %type_ifp = (
+        'b'     => 'IFP_INT',
+        'w'     => 'IFP_INT',
+        'l'     => 'IFP_INT',
+        'q'     => 'IFP_INT',
+        'o'     => 'IFP_INT',
+
+        'f'     => 'IFP_F',
+        'd'     => 'IFP_D',
+        'g'     => 'IFP_G',
+        'h'     => 'IFP_H',
+);
+
 sub width($) {
 	my ($optype) = @_;
 
 	# remove first letter (access type) so data type letter remains
 	$optype =~ s/^.//;
-	$data_types{$optype};
+	$type_width{$optype};
+}
+
+sub ifp($) {
+	my ($optype) = @_;
+
+	# remove first letter (access type) so data type letter remains
+	$optype =~ s/^.//;
+	$type_ifp{$optype};
 }
 
 
@@ -511,6 +533,36 @@ sub print_for_c() {
 
 		if (exists $ops{$i}) {
 			my $s = join(", ", map { width($_) } split(" ", $ops{$i}));
+
+			printf "/* %02X %-6s */  {%s},\n", $i & 0xFF, $mne{$i}, $s;
+		} else {
+			printf "/* %02X %-6s */  {},\n", $i & 0xFF, "---";
+		}
+
+		if ((($i & 0xF) == 0xF) && ($i != 511)) {
+			print "\n";
+		}
+	}
+	print "};\n";
+	print "\n";
+	print "\n";
+
+	print "/* all non-fp operands are \"integers\" -- including branch displacements */\n";
+	print "enum ifp	{ IFP_INT, IFP_F, IFP_D, IFP_G, IFP_H };\n";
+	print "\n";
+	print "/* A table of operand types (int/f/d/g/h) for each instruction -- intended for asm/dis. */\n";
+	print "enum ifp op_ifp[512][6] = {\n";
+	for (my $i = 0; $i < 512; $i++) {
+		if ($i == 0) {
+			print  "/* single-byte opcodes */\n";
+			print "\n";
+		} elsif ($i == 256) {
+			print "/* FD prefix */\n";
+			print "\n";
+		}
+
+		if (exists $ops{$i}) {
+			my $s = join(", ", map { ifp($_) } split(" ", $ops{$i}));
 
 			printf "/* %02X %-6s */  {%s},\n", $i & 0xFF, $mne{$i}, $s;
 		} else {

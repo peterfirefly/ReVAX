@@ -528,6 +528,9 @@ sub read_ucode() {
 
 		# label
 		if ($line =~ s/^([a-zA-Z0-9\[\]\(\)_\+-]+)://) {
+			# FIXME don't throw the label's case away!
+			#       ulabels[] is much nicer if case is preserved.
+
 			my $label = uc $1;
 
 			die "|$label| is a duplicate label, line $lineno.\n" if exists $lbls{$label};
@@ -837,7 +840,7 @@ sub write_tables() {
 	printf "\tuint16_t\tutarget;\n";
 	printf "\tint\t\tcc;\n";
 	printf "\tint\t\tflags;  /* 0=arch, 1=µ */\n";
-	printf "\tint\t\twidth;\n";
+	printf "\tenum width\twidth;\n";
 	printf "\t_Bool\t\tlast;\n";
 	printf "} ucode[%d] = {\n", scalar @ucode;
 	for (my $i=0; $i < scalar @ucode; $i++) {
@@ -1003,6 +1006,17 @@ foreach my $k ('s1', 's2', 'dst', 'imm', 'cc', 'utarget') {
 	}
 	printf "\n\n";
 
+	# label names
+	printf "struct {\n";
+	printf "\tconst char\t*name;\n";
+	printf "\tint\t\tvalue;\n";
+	printf "} ulabels[] = {\n";
+	foreach my $s (sort keys(%lbls)) {
+		printf "  {.name=\"%s\",  .value=%s},\n", $s, $lbls{$s};
+	}
+	printf "};\n";
+	printf "\n\n";
+	
 	# ustart[512]
 	printf "/* microcode labels -- instructions */\n";
 	print "unsigned ustart[512] = {\n";

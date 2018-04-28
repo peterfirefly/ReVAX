@@ -30,6 +30,8 @@
 
 #include "op-support.h"
 
+#include "vax-instr.h"
+
 /* expand_lit6() */
 #include "op-lit6.h"
 

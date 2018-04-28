@@ -434,6 +434,8 @@ sub handle_asm_syntax($) {
 	printf "{\n";
 	printf "\tstruct fields\tfields = {};\n";
 	printf "\n";
+	printf "\tparse_skipws();\t/* parse_chx() doesn't skip whitespace */\n";
+	printf "\n";
 
 	# loop through each case
 	foreach my $case (@{$file{'asm.' . $syntax}}) {

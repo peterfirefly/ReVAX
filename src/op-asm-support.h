@@ -26,6 +26,8 @@
 
 #include "fp.h"
 
+#include "vax-instr.h"
+
 /***/
 
 
@@ -140,15 +142,20 @@ static bool all_high_zeros(struct big_int x, int width)
 }
 
 
+/* width = size in bytes */
 static bool valid_bigint(struct big_int x, int width)
 {
 	/* valid bigints contain a signextended form of the lower 1/2/4/8/16
 	   bytes, that is, the upper bits are either all 0 or all 1.
+
+FIXME should check that the upper bits are copies of the sign bit?
 	 */
+
 	return all_high_ones(x, width) || all_high_zeros(x, width);
 }
 
 
+/* width = size in bytes */
 static bool parse_bigint(struct big_int *x, int width)
 {
 	/* [+-][0-9][0-9_]*
@@ -533,7 +540,7 @@ static bool parse_pcrel8(int32_t *disp, uint32_t pc, int width, enum ifp ifp)
 		uint32_t	tmp;
 
 		tmp = x.val[0] - pc;
-		if (((tmp >> 24) == 0x0) || ((tmp >> 24) == 0xFFFFFF)) {
+		if (((tmp >> 8) == 0x0) || ((tmp >> 8) == 0xFFFFFF)) {
 			*disp = tmp;
 			return true;
 		}
@@ -573,6 +580,44 @@ static bool parse_pcrel32(int32_t *disp, uint32_t pc, int width, enum ifp ifp)
 
 	if (parse_bigint(&x, 4)) {
 		*disp = x.val[0] - pc;
+		return true;
+	}
+	parse_ok = false;
+	return false;
+}
+
+
+/* 'bb' operand (byte-sized relative branch) */
+static bool parse_branch8(uint8_t *disp, uint32_t pc)
+{
+	struct big_int	x;
+
+	if (parse_bigint(&x, 4)) {
+		int32_t	tmp = x.val[0] - pc;
+		if ((int32_t)(int8_t)(tmp & 0xFF) != tmp) {
+			parse_ok = false;
+			return false;
+		}
+		*disp = tmp;
+		return true;
+	}
+	parse_ok = false;
+	return false;
+}
+
+
+/* 'bw' operand (word-sized relative branch) */
+static bool parse_branch16(uint16_t *disp, uint32_t pc)
+{
+	struct big_int	x;
+
+	if (parse_bigint(&x, 4)) {
+		int32_t	tmp = x.val[0] - pc;
+		if ((int32_t)(int16_t)(tmp & 0xFFFF) != tmp) {
+			parse_ok = false;
+			return false;
+		}
+		*disp = tmp;
 		return true;
 	}
 	parse_ok = false;

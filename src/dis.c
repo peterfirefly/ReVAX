@@ -79,7 +79,14 @@
 
 #define STATIC static
 #include "op-dis-support.h"
+STATIC struct dis_ret op_dis_sane(uint8_t b[MAX_OPLEN], uint32_t pc, int width, enum ifp ifp) __attribute__((unused));
 #include "op-dis.h"
+
+/* op_sim() is used to decode operand 3 of CASE instructions */
+#include "vax-ucode.h"		/* necessary for op-sim.h */
+#include "op-sim-support.h"
+#include "op-sim.h"
+
 #include "op-val-support.h"
 #include "op-val.h"
 
@@ -108,613 +115,6 @@ size_t		blob_size;
     return last valid addr?
  */
 
-/* this routine handles all normal fetches from the code blob -- it makes
-   sense to use a single function that returns a 32-bit number because the VAX
-   is such a 32-bit machine through and through.
-
-   64-bit fetches *are* used in a few places, because the VAX also supports a
-   64-bit integer (quad) and the 64-bit floating-point types (d/g).
-
-   The 64-bit types are only visible to the disassembler as immediate operands
-   to ASHQ, MOVQ, EDIV and (ADD|SUB|MUL|DIV)[DG][23], CVT[DG][BWL], CVTRDL,
-   CVTDF, CVTGF, CVTRGL, (ACB|MOV|CMP|MNEG|TST|EMOD|POLY)[DG].
-
-   That's a lot more 64-bit floating-point operations than I expected!
-
-   The 128-bit types defined in the VAX architecture (octo for integers and h
-   for floating-point) are not supported by this disassembler.
-
-   Used for both integers (byte/word/long) and floating-point (f).
-*/
-int32_t fetch(unsigned idx, int width)
-{
-	/* FIXME range check idx */
-	switch (width) {
-	case 1:		return (int32_t)(int8_t)  (blob[idx  ]);
-	case 2:		return (int32_t)(int16_t) (blob[idx  ]      + (blob[idx+1]<< 8));
-	case 4:		return (int32_t)( blob[idx  ]      + (blob[idx+1]<< 8) +
-				         (blob[idx+2]<<16) + ((uint32_t)(blob[idx+3])<<24));
-	default:
-		fprintf(stderr, "fetch width: %d\n", width);
-		assert(0);
-	}
-}
-
-
-/* used for both integers (quad) and floating-point (d, g) */
-int64_t fetchq(unsigned idx)
-{
-	/* FIXME range check idx */
-
-	return ((int64_t) blob[idx  ]    ) + ((int64_t) blob[idx+1]<< 8) +
-	       ((int64_t) blob[idx+2]<<16) + ((int64_t) blob[idx+3]<<24) +
-	       ((int64_t) blob[idx+4]<<32) + ((int64_t) blob[idx+5]<<40) +
-	       ((int64_t) blob[idx+6]<<48) + ((int64_t) blob[idx+7]<<48);
-}
-
-
-/* FIXME conversion routines for f/d/g floating-point to ASCII as decimal
-   numbers.
-
-
-   The "cheat" would be to use IEEE but they don't quite have the same range or
-   set of INF/NAN.
- */
-
-enum { FMT_VAX, FMT_SANE } format = FMT_SANE;
-
-
-/* Adding a 32-bit displacement to a 32-bit address may cause a wrap-around.
-
-   This is perfectly legal C behaviour but such wrap-arounds are in general
-   a symptom of something going wrong and may cause security holes.
-   Clang can check for such overflows (which is generally a good idea) but in
-   this particular case it is just fine.  The addition is pulled out into a
-   function of its own so the warning can be selectively disabled.
- */
-#if defined(__clang__)
-/* gcc doesn't have the no_sanitize attribute (yet?) */
-static uint32_t addr_disp(uint32_t addr, uint32_t disp)
-		__attribute__((no_sanitize("unsigned-integer-overflow")));
-#endif
-static uint32_t addr_disp(uint32_t addr, uint32_t disp)
-{
-	return addr + disp;
-}
-
-
-/* FIXME: two-char operand code, so we can handle bitfields and floats correctly */
-/* returns operand size in bytes */
-unsigned dis_op(char *buf, unsigned idx, unsigned end_idx, char access, char type, int width)
-{
-	/* FIXME always use fetch()! */
-
-	/* FIXME better solution to "reserved operand" handling */
-	/* FIXME register name translation/comments */
-
-	unsigned	Rn = blob[idx] & 0x0F;
-
-	(void) end_idx;
-
-	if (access == 'b') {
-		/* 'b' = branch */
-		switch (type) {
-		case 'b':
-			{
-			uint32_t	target = addr_disp(blob_start + idx + 1, fetch(idx, 1));
-
-			sprintf(buf, "0x%04X_%04X", SPLIT(target));
-			return 1;
-			}
-		case 'w':
-			{
-			uint32_t	target = addr_disp(blob_start + idx + 2, fetch(idx, 2));
-
-			sprintf(buf, "0x%04X_%04X", SPLIT(target));
-			return 2;
-			}
-		default:
-			fprintf(stderr, "optype: %c%c\n", access, type);
-			assert(0);
-		}
-	}
-
-
-	switch (blob[idx] & 0xF0) {
-	case 0x00:
-	case 0x10:
-	case 0x20:
-	case 0x30: /* 6-bit literal */
-
-		/* FIXME: floating-point 6-bit literals are different! */
-		switch (format) {
-		case FMT_VAX:
-			sprintf(buf, "S^#%d", blob[idx] & 0x3F);
-			break;
-		case FMT_SANE:
-			sprintf(buf, "%d",    blob[idx] & 0x3F);
-			break;
-		}
-		return 1;
-
-	case 0x40:
-		/* indexed */
-		{
-		unsigned	Rx = Rn;
-		Rn = blob[idx+1] & 0x0F;
-
-		if (Rn == Rx) {
-			sprintf(buf, "resop [%02X %02X]", blob[idx], blob[idx+1]);
-			return 2;
-		}
-
-		switch (blob[idx+1] & 0xF0) {
-		case 0x60:
-			/* register def idx -- (Rn)[Rx] | [Rn + Rx*sze] */
-			switch (format) {
-			case FMT_VAX:
-				sprintf(buf, "(r%d)[r%d]", Rn, Rx);
-				break;
-
-			case FMT_SANE:
-				if (width == 1)
-					sprintf(buf, "[r%d + r%d]", Rn, Rx);
-				else
-					sprintf(buf, "[r%d + r%d*%d]", Rn, Rx, width);
-				break;
-			}
-			return 2;
-
-		case 0x70:
-			/* autodec idx     -- -(Rn)[Rx]  | [--Rn + Rx*sze]   */
-			switch (format) {
-			case FMT_VAX:
-				sprintf(buf, "-(r%d)[r%d]", Rn, Rx);
-				break;
-
-			case FMT_SANE:
-				if (width == 1)
-					sprintf(buf, "[--r%d + r%d]", Rn, Rx);
-				else
-					sprintf(buf, "[--r%d + r%d*%d]", Rn, Rx, width);
-				break;
-			}
-			return 2;
-
-		case 0x80:
-			/* FIXME 8F = undefined */
-			if (Rn == 0xF) {
-				sprintf(buf, "resop [%02X %02X]", blob[idx], blob[idx+1]);
-				return 2;
-			}
-
-			/* autoinc idx     -- (Rn)+[Rx] | [Rn++ + Rx*sze] */
-			switch (format) {
-			case FMT_VAX:
-				sprintf(buf, "(r%d)+[r%d]", Rn, Rx);
-				break;
-
-			case FMT_SANE:
-				if (width == 1)
-					sprintf(buf, "[r%d++ + r%d]", Rn, Rx);
-				else
-					sprintf(buf, "[r%d++ + r%d*%d]", Rn, Rx, width);
-				break;
-			}
-			return 2;
-
-		case 0x90:
-			/* autoinc def idx -- @(Rn)+[Rx] | [[Rn++] + Rx*sze]   */
-
-			if (Rn == 0xF) {
-				/* absolute idx -- @#addr[Rx] | [addr + Rx*sze] */
-				int32_t		addr = fetch(idx+2, 4);
-
-				switch (format) {
-				case FMT_VAX:
-					sprintf(buf, "@#%04X_%04X[r%d]", SPLIT(addr), Rx);
-					break;
-
-				case FMT_SANE:
-					if (width == 1)
-						sprintf(buf, "[%04X_%04X + r%d]",
-							SPLIT(addr), Rx);
-					else
-						sprintf(buf, "[%04X_%04X + r%d*%d]",
-							SPLIT(addr), Rx, width);
-					break;
-				}
-				return 2+4;
-			} else {
-				switch (format) {
-				case FMT_VAX:
-					sprintf(buf, "@(r%d)+[r%d]", Rn, Rx);
-					break;
-
-				case FMT_SANE:
-					if (width == 1)
-						sprintf(buf, "[[r%d++] + r%d]", Rn, Rx);
-					else
-						sprintf(buf, "[[r%d++] + r%d*%d]", Rn, Rx, width);
-					break;
-				}
-				return 2;
-			}
-
-		case 0xA0:
-			/* byte disp idx     -- B^D(Rn)[Rx]  | [Rn + disp + Rx*sze] */
-			{
-			int32_t		disp = fetch(idx+2, 1);
-
-			switch (format) {
-			case FMT_VAX:
-				sprintf(buf, "B^%d(r%d)[r%d]", disp, Rn, Rx);
-				break;
-
-			case FMT_SANE:
-				if (width == 1)
-					sprintf(buf, "[r%d + %d + r%d]", Rn, disp, Rx);
-				else
-					sprintf(buf, "[r%d + %d + r%d*%d]", Rn, disp, Rx, width);
-				break;
-			}
-			return 2+1;
-			}
-		case 0xB0:
-			/* byte disp def idx -- @B^D(Rn)[Rx] | [[Rn + disp] + Rx<<idx] */
-			{
-			int32_t		disp = fetch(idx+2, 1);
-
-			switch (format) {
-			case FMT_VAX:
-				sprintf(buf, "@B^%d(r%d)[r%d]", disp, Rn, Rx);
-				break;
-
-			case FMT_SANE:
-				if (width == 1)
-					sprintf(buf, "[[r%d + %d] + r%d]", Rn, disp, Rx);
-				else
-					sprintf(buf, "[[r%d + %d] + r%d*%d]", Rn, disp, Rx, width);
-				break;
-			}
-			return 2+1;
-			}
-		case 0xC0:
-			/* word disp idx     -- W^D(Rn)[Rx]  | [Rn + disp + Rx<<idx] */
-			{
-			int32_t		disp = fetch(idx+2, 2);
-
-			switch (format) {
-			case FMT_VAX:
-				sprintf(buf, "W^%d(r%d)[r%d]", disp, Rn, Rx);
-				break;
-
-			case FMT_SANE:
-				if (width == 1)
-					sprintf(buf, "[r%d + %d + r%d]", Rn, disp, Rx);
-				else
-					sprintf(buf, "[r%d + %d + r%d*%d]", Rn, disp, Rx, width);
-				break;
-			}
-			return 2+2;
-			}
-		case 0xD0:
-			/* word disp def idx -- @W^D(Rn)[Rx] | [[Rn + disp] + Rx<<idx] */
-			{
-			int32_t		disp = fetch(idx+2, 2);
-
-			switch (format) {
-			case FMT_VAX:
-				sprintf(buf, "@W^%d(r%d)[r%d]", disp, Rn, Rx);
-				break;
-
-			case FMT_SANE:
-				if (width == 1)
-					sprintf(buf, "[[r%d + %d] + r%d]", Rn, disp, Rx);
-				else
-					sprintf(buf, "[[r%d + %d] + r%d*%d]", Rn, disp, Rx, width);
-				break;
-			}
-			return 2+2;
-			}
-		case 0xE0:
-			/* lword disp idx    -- L^D(Rn)[Rx]  | [Rn + disp + Rx<<idx] */
-			{
-			int32_t		disp = fetch(idx+2, 4);
-
-			switch (format) {
-			case FMT_VAX:
-				sprintf(buf, "L^%d(r%d)[r%d]", disp, Rn, Rx);
-				break;
-
-			case FMT_SANE:
-				if (width == 1)
-					sprintf(buf, "[r%d + %d + r%d]", Rn, disp, Rx);
-				else
-					sprintf(buf, "[r%d + %d + r%d*%d]", Rn, disp, Rx, width);
-				break;
-			}
-			return 2+4;
-			}
-		case 0xF0:
-			/* lword disp def idx --@L^D(Rn)[Rx] | [[Rn + disp] + Rx<<idx] */
-			{
-			int32_t		disp = fetch(idx+2, 4);
-
-			switch (format) {
-			case FMT_VAX:
-				sprintf(buf, "@L^%d(r%d)[r%d]", disp, Rn, Rx);
-				break;
-
-			case FMT_SANE:
-				if (width == 1)
-					sprintf(buf, "[[r%d + %d] + r%d]", Rn, disp, Rx);
-				else
-					sprintf(buf, "[[r%d + %d] + r%d*%d]", Rn, disp, Rx, width);
-				break;
-			}
-			return 2+4;
-			}
-		default:
-			sprintf(buf, "resop [%02X %02X]", blob[idx], blob[idx+1]);
-			return 2;
-		}
-		break;	/* assuage the compiler */
-		}
-
-	case 0x50:
-		/* register --           Rn   |  Rn      */
-		if (Rn == 0xF) {
-			sprintf(buf, "resop [%02X]", blob[idx]);
-			return 1;
-		}
-
-		sprintf(buf, "r%d", Rn);
-		return 1;
-
-	case 0x60:
-		/* register deferred -- (Rn)  |  [Rn]    */
-		if (Rn == 0xF) {
-			sprintf(buf, "resop [%02X]", blob[idx]);
-			return 1;
-		}
-
-		switch (format) {
-		case FMT_VAX:
-			sprintf(buf, "(r%d)", Rn);
-			break;
-
-		case FMT_SANE:
-			sprintf(buf, "[r%d]", Rn);
-			break;
-		}
-		return 1;
-
-	case 0x70:
-		/* autodecrement --    -(Rn)  |  [--Rn]  */
-		if (Rn == 0xF) {
-			sprintf(buf, "resop [%02X]", blob[idx]);
-			return 1;
-		}
-
-		switch (format) {
-		case FMT_VAX:
-			sprintf(buf, "-(r%d)", Rn);
-			break;
-		case FMT_SANE:
-			sprintf(buf, "[--r%d]", Rn);
-			break;
-		}
-		return 1;
-
-	case 0x80:
-		/* autoincrement --    (Rn)+  |  [Rn++]  */
-		if (Rn == 0xF) {
-			/* This is the only place where 64-bit and 128-bit
-			   operands are visible to the assembler, namely when
-			   they are used as immediates.  It is therefore the
-			   only place where fetch() is called with width as
-			   a parameter.
-
-			   32-bit and 64-bit operands may be either integers
-			   (long, quad) or floating-point numbers (f, d, g).
-
-			   We need the type letter for the operand in order to
-			   parse it correctly.
-
-			   FIXME: 128-bit integers (octo) and floating-point
-			   numbers (h) are not supported.
-			 */
-
-
-			/* FIXME this case should really be a case on the
-			   type letter, not the width.
-			 */
-
-			/* immediate -- I^#xx |  #xxx   */
-			if (width == 8) {
-				sprintf(buf, "Q^#xxxx_xxxx");
-				return 1+8;
-			}
-
-			if (width == 0) {
-fprintf(stderr, "optype: %c%c\n", access, type);
-
-			}
-
-			int32_t		imm = fetch(idx+1, width);
-
-			switch (format) {
-			case FMT_VAX:
-				switch (width) {
-				case 1:	/* byte */
-					sprintf(buf, "B^#%d", imm);
-					break;
-				case 2: /* word */
-					sprintf(buf, "W^#%d", imm);
-					break;
-				case 4: /* long word */
-					sprintf(buf, "L^#%d", imm);
-					break;
-#if 0
-				case 8: /* quad word or d/g floating-point */
-					sprintf(buf, "#%d", fetchq(idx+1));
-					break;
-#endif
-				default:
-					sprintf(buf, "?? [width=%d]", width);
-				}
-				break;
-
-			case FMT_SANE:
-				sprintf(buf, "#%d", imm);
-				break;
-			}
-			return 1 + width;
-		} else {
-			switch (format) {
-			case FMT_VAX:
-				sprintf(buf, "(r%d)+", Rn);
-				break;
-
-			case FMT_SANE:
-				sprintf(buf, "[r%d++]", Rn);
-				break;
-			}
-			return 1;
-		}
-		break;	/* assuage the compiler */
-
-	case 0x90:
-		/* autoincrement deferred -- @(Rn)+   | [[Rn++]]       */
-		if (Rn == 0xF) {
-			/* absolute --       @#addr   | [#addr]        */
-			int32_t		addr = fetch(idx+1, 4);
-
-			switch (format) {
-			case FMT_VAX:
-				sprintf(buf, "@#%04X_%04X", SPLIT(addr));
-				break;
-
-			case FMT_SANE:
-				sprintf(buf, "[#0x%04X_%04X]", SPLIT(addr));
-				break;
-			}
-			return 1+4;
-		} else {
-			switch (format) {
-			case FMT_VAX:
-				sprintf(buf, "@(r%d)+", Rn);
-				break;
-
-			case FMT_SANE:
-				sprintf(buf, "[[r%d++]]", Rn);
-				break;
-			}
-			return 1;
-		}
-		break;	/* assuage the compiler */
-
-	case 0xA0:
-		/* byte displacement   --  B^disp(Rn) | [Rn + bdisp]   */
-		{
-		int32_t		disp = fetch(idx+1, 1);
-
-		switch (format) {
-		case FMT_VAX:
-			sprintf(buf, "B^%d(r%d)", disp, Rn);
-			break;
-
-		case FMT_SANE:
-			sprintf(buf, "[r%d + %d]", Rn, disp);
-			break;
-		}
-		return 1+1;
-		}
-	case 0xB0:
-		/* byte disp deferred  -- @B^disp(Rn) | [[Rn + bdisp]]   */
-		{
-		int32_t		disp = fetch(idx+1, 1);
-
-		switch (format) {
-		case FMT_VAX:
-			sprintf(buf, "@B^%d(r%d)", disp, Rn);
-			break;
-
-		case FMT_SANE:
-			sprintf(buf, "[[r%d + %d]]", Rn, disp);
-			break;
-		}
-		return 1+1;
-		}
-	case 0xC0:
-		/* word disp           -- W^disp(Rn)  | [Rn + wdisp]   */
-		{
-		int32_t		disp = fetch(idx+1, 2);
-
-		switch (format) {
-		case FMT_VAX:
-			sprintf(buf, "W^%d(r%d)", disp, Rn);
-			break;
-
-		case FMT_SANE:
-			sprintf(buf, "[r%d + %d]", Rn, disp);
-			break;
-		}
-		return 1+2;
-		}
-	case 0xD0:
-		/* word disp deferred  -- @W^disp(Rn) | [[Rn + wdisp]] */
-		{
-		int32_t		disp = fetch(idx+1, 2);
-
-		switch (format) {
-		case FMT_VAX:
-			sprintf(buf, "@W^%d(r%d)", disp, Rn);
-			break;
-
-		case FMT_SANE:
-			sprintf(buf, "[[r%d + %d]]", Rn, disp);
-			break;
-		}
-		return 1+2;
-		}
-	case 0xE0:
-		/* lword disp          -- L^disp(Rn)  | [Rn + ldisp]   */
-		{
-		int32_t		disp = fetch(idx+1, 4);
-
-		switch (format) {
-		case FMT_VAX:
-			sprintf(buf, "L^%d(r%d)", disp, Rn);
-			break;
-
-		case FMT_SANE:
-			sprintf(buf, "[r%d + %d]", Rn, disp);
-			break;
-		}
-		return 1+4;
-		}
-	case 0xF0:
-		/* lword disp deferred -- @L^disp(Rn) | [[Rn + ldisp]] */
-		{
-		int32_t		disp = fetch(idx+1, 4);
-
-		switch (format) {
-		case FMT_VAX:
-			sprintf(buf, "@L^%d(r%d)", disp, Rn);
-			break;
-
-		case FMT_SANE:
-			sprintf(buf, "[[r%d + %d]]", Rn, disp);
-			break;
-		}
-		return 1+4;
-		}
-	default:
-		assert(0);
-	}
-}
 
 
 
@@ -731,6 +131,16 @@ struct buf {
 	char	instr[1024];
 	char	comment[1024];
 };
+
+
+
+static void clear_buf(struct buf *buf)
+{
+	buf->addr[0] = '\0';
+	buf->bytes[0] = '\0';
+	buf->instr[0] = '\0';
+	buf->comment[0] = '\0';
+}
 
 
 /* output addr + instruction bytes + disassembly + comment(s), nicely formatted.
@@ -785,6 +195,20 @@ static void output(struct outfiles *f, struct buf *buf)
 }
 
 
+static void output_empty_line(struct outfiles *f)
+{
+	/* .asm file */
+	fprintf(f->asm_, "\n");
+
+	/* .lst file */
+	fprintf(f->lst, "\n");
+
+	/* HTML */
+	fprintf(f->htm, "<TR>\n");
+	fprintf(f->htm, "</TR>\n");
+}
+
+
 void dis(struct outfiles *f, unsigned idx, int len)
 {
 	unsigned	end_idx = idx + len;
@@ -797,41 +221,68 @@ void dis(struct outfiles *f, unsigned idx, int len)
 		struct buf	buf;
 
 		/* clear output buffers */
-		buf.addr[0] = '\0';
-		buf.bytes[0] = '\0';
-		buf.instr[0] = '\0';
-		buf.comment[0] = '\0';
+		clear_buf(&buf);
 
 		/* addr */
 		sprintf(buf.addr, "%04X_%04X", SPLIT(blob_start + idx));
 
-		/* FIXME always use fetch()! */
-		/* FIXME - output opcode */
 
 		/* decode opcode */
-		if (blob[idx] == 0xFD) {
+		switch (blob[idx]) {
+		case 0xFC:	/* XFC nn */
 			if (idx+1 >= end_idx) {
-				sprintf(buf.instr, " FD <incomplete>\n");
+				sprintf(buf.instr, "XFC <incomplete>");
+				sprintf(buf.bytes, "FC");
+				sprintf(buf.comment, "FC is the first byte of an \"extended\" instruction");
+				output(f, &buf);
+				return;
+			}
+			sprintf(buf.instr, "XFC #0x%02X", blob[idx+1]);
+			sprintf(buf.bytes, "%02X%02X", blob[idx], blob[idx+1]);
+			idx += 2;
+			output(f, &buf);
+			continue;
+		case 0xFD:	/* normal two-byte instruction */
+			if (idx+1 >= end_idx) {
+				sprintf(buf.instr, " FD <incomplete>");
+				sprintf(buf.bytes, "FD");
+				sprintf(buf.comment, "FD is the start of a normal two-byte instruction");
 				output(f, &buf);
 				return;
 			}
 			op = blob[idx+1] + 0x100;
 			oplen = 2;
 			sprintf(buf.bytes, "%02X%02X ", blob[idx], blob[idx+1]);
-		} else {
+			break;
+		case 0xFE:
+		case 0xFF:
+			/* two-byte reserved instructions */
+			if (idx+1 >= end_idx) {
+				sprintf(buf.instr, " %02X <incomplete>", blob[idx]);
+				sprintf(buf.bytes, "%02X", blob[idx]);
+				sprintf(buf.comment, "%02X is the start of an undefined two-byte instruction", blob[idx]);
+				output(f, &buf);
+				return;
+			}
+			sprintf(buf.instr, ".byte   0x%02X, 0x%02X", blob[idx], blob[idx+1]);
+			sprintf(buf.bytes, "%02X%02X", blob[idx], blob[idx+1]);
+			sprintf(buf.comment, " *** reserved instruction");
+			idx += 2;
+			output(f, &buf);
+			continue;
+		default:
 			op = blob[idx];
 			oplen = 1;
 			sprintf(buf.bytes, "%02X ", blob[idx]);
 		}
 
 		if (strlen(mne[op]) == 0) {
-			/* FIXME db XXh or XXXXh */
-			sprintf(buf.instr, " *** reserved instruction");
-
-			/* FIXME handle FFFF, FFFE */
-
+			if (op <= 255)
+				sprintf(buf.instr, ".byte   0x%02X", op);
+			else
+				sprintf(buf.instr, ".byte   0xFD, 0x%02X", op & 0xFF);
+			sprintf(buf.comment, " *** reserved instruction");
 			idx += oplen;
-
 			output(f, &buf);
 			continue;
 		}
@@ -841,37 +292,166 @@ void dis(struct outfiles *f, unsigned idx, int len)
 		idx += oplen;
 
 		if (strcmp(mne[op], "REI") == 0) {
-			sprintf(&buf.comment[strlen(buf.comment)], "return from interrupt");
+			sprintf(buf.comment + strlen(buf.comment), "return from interrupt");
 		}
 
 
-		/* does it have ops? */
-		if (strlen(ops[op]) != 0) {
-			for (unsigned i=0; i < op_cnt[op]; i++) {
-				if (i > 0)
-					sprintf(&buf.instr[strlen(buf.instr)], ", ");
+		/* disassemble ops -- also note operand #3 for CASE instructions */
+		bool		op3_const = false;
+		uint32_t	op3_value = 0;
+		for (unsigned i=0; i < op_cnt[op]; i++) {
+			if (i > 0)
+				sprintf(buf.instr + strlen(buf.instr), ", ");
 
-				/* disassemble an operand given its datatype */
-				unsigned len;
-				len = dis_op(&buf.instr[strlen(buf.instr)],
-					      idx, end_idx, ops[op][i*3], ops[op][i*3+1],
-					      op_width[op][i]);
+			/* prepare b[], pc, width for the operand */
+			uint8_t	b[MAX_OPLEN];
+			if (idx+MAX_OPLEN-1 >= end_idx) {
+				memset(b, 0x0, MAX_OPLEN);
+				memcpy(b, blob+idx, end_idx - idx);
+			} else {
+				memcpy(b, blob+idx, MAX_OPLEN);
+			}
 
+			uint32_t	pc = blob_start + idx;
+			int		width = op_width[op][i]; /* no of bytes */
+
+			/* disassemble an operand given its datatype */
+			if (ops[op][i*3] == 'b') {	// branch operand
+				uint32_t	relative_pc = blob_start + idx;
+				uint32_t	disp;
+
+				/* bb, bw */
+				switch (op_width[op][i]) {
+				case 1: relative_pc += 1;
+					disp = (int32_t)(int8_t) blob[idx];
+					sprintf(buf.instr + strlen(buf.instr), "0x%04X_%04X", SPLIT(relative_pc + disp));
+					sprintf(buf.bytes + strlen(buf.bytes), "%02X", blob[idx]);
+					idx += 1;
+					break;
+				case 2: relative_pc += 2;
+					disp = (int32_t)(int16_t) ((blob[idx+1] << 8) | blob[idx]);
+					sprintf(buf.instr + strlen(buf.instr), "0x%04X_%04X", SPLIT(relative_pc + disp));
+					sprintf(buf.bytes + strlen(buf.bytes), "%02X%02X", blob[idx], blob[idx+1]);
+					idx += 2;
+					break;
+				}
+				continue;
+			}
+
+			/* note operand 3 for CASEB/CASEW/CASEL */
+			if ((i == 2) && ((op == 0x8F) || (op == 0xAF) || (op == 0xCF))) {
+				if (((b[0] & 0xC0) == 0x00) || (b[0] == 0x8F)) {
+					struct fields	fields;
+
+					op_sim(b, &fields, width, op_ifp[op][i]);
+					op3_const = true;
+					op3_value = fields.imm.val[0];
+
+					/* op_sim() sign extends, let's zero
+					   extend instead.
+					 */
+					switch (width) {
+					case 1:	op3_value = op3_value & 0xFF;
+							break;
+					case 2:	op3_value = op3_value & 0xFFFF;
+							break;
+					}
+				}
+			}
+
+			struct dis_ret dis_ret;
+			dis_ret = op_dis_vax(b, pc, width, op_ifp[op][i]);
+
+			if ((dis_ret.cnt <= 0) || !op_val(b, width)) {
+				sprintf(buf.instr   + strlen(buf.instr), "???");
+				sprintf(buf.comment + strlen(buf.comment), "reserved operand");
+			} else if (idx+dis_ret.cnt > end_idx) {
 				/* output operand bytes */
-				for (unsigned j=0; j<len; j++)
-					sprintf(buf.bytes + strlen(buf.bytes),
-						"%02X", blob[idx+j]);
+				for (unsigned j=0; j<(unsigned)dis_ret.cnt; j++)
+					sprintf(buf.bytes + strlen(buf.bytes), "%02X", b[j]);
 				sprintf(buf.bytes + strlen(buf.bytes), " ");
 
-				/* move "PC" to just past this operand */
-				idx += len;
+				sprintf(buf.instr   + strlen(buf.instr), "???");
+				sprintf(buf.comment + strlen(buf.comment), "incomplete operand");
+				output(f, &buf);
+				return;
+			} else {
+				/* output operand bytes */
+				for (unsigned j=0; j<(unsigned)dis_ret.cnt; j++)
+					sprintf(buf.bytes + strlen(buf.bytes), "%02X", b[j]);
+				sprintf(buf.bytes + strlen(buf.bytes), " ");
+
+				/* add disassembled operand to the disassembled instruction */
+				strncat(buf.instr, dis_ret.str, sizeof(buf.instr) - strlen(buf.instr)-1);
+
+				/* skip just past this operand */
+				idx += dis_ret.cnt;
 			}
 		}
 
 		/* push the output out to the world as .asm, .lst, and .html */
 		output(f, &buf);
 
-		/* FIXME special-case CASE instructions */
+		/* special case CASEB/CASEW/CASEL */
+		if ((op == 0x8F) || (op == 0xAF) || (op == 0xCF)) {
+			/* The size of the jump table is given by the third
+			   operand (limit).
+
+			   A table size of 0 is not useful, so the range
+			   has been shifted a bit:
+
+			    limit  | size of table
+			   ------------------------
+			       0   |    1
+			       1   |    2
+			       2   |    3
+			          ...
+			     255   |  256
+
+			   If the limit operand is not a short literal or an
+			   immediate, then we don't know how big the jump table
+			   is.  In practice, it is always a constant.
+			 */
+
+			if (!op3_const) {
+				clear_buf(&buf);
+				sprintf(buf.comment, "*** unknown jump table size!");
+				output(f, &buf);
+				output_empty_line(f);
+			} else {
+				uint32_t	relative_pc = blob_start + idx;
+
+				/* loop through the jump table */
+				for (uint32_t i=0;; i++) {
+					uint16_t	disp;
+
+					if (idx+1 > end_idx) {
+						clear_buf(&buf);
+						sprintf(buf.addr, "%04X_%04X", SPLIT(blob_start + idx));
+						sprintf(buf.instr, ".word    ???");
+						sprintf(buf.comment, "incomplete jump table");
+						output(f, &buf);
+						idx +=2;
+						break;
+					} else {
+						disp = (blob[idx+1] << 8) | blob[idx];
+					}
+
+					clear_buf(&buf);
+					sprintf(buf.addr, "%04X_%04X", SPLIT(blob_start + idx));
+					sprintf(buf.instr, ".word   0x%04X", disp);
+					sprintf(buf.bytes, "%02X%02X", disp & 0xFF, disp >> 8);
+					sprintf(buf.comment, "%-3d --> %04X_%04X",
+							i, SPLIT(relative_pc + (int32_t)(int16_t)(disp)));
+					output(f, &buf);
+
+					idx +=2;
+					if (i == op3_value)
+						break;
+				}
+				output_empty_line(f);
+			}
+		}
 
 		/* FIXME empty line after end of basic blocks */
 	}
@@ -992,6 +572,7 @@ void prepare_classification()
 
     -1   reserved operand
  */
+static int op_len(unsigned idx, int width) __attribute__((unused));
 static int op_len(unsigned idx, int width)
 {
 	switch (blob[idx] & 0xF0) {
@@ -1336,7 +917,7 @@ struct outfiles *open_out_files(const char *fname, const char *outname)
 	fprintf(f->htm, "<table class=\"code\">\n");
 
 	/* asm and lst files */
-	char	*asmname = mem_sprintf("%s.asm", outname);
+	char	*asmname = mem_sprintf("%s.disasm", outname);
 	char	*lstname = mem_sprintf("%s.lst", outname);
 
 	f->asm_ = fopen(asmname, "w");
@@ -1383,11 +964,11 @@ struct outfiles *open_out_files(const char *fname, const char *outname)
 void close_out_files(struct outfiles *f, const char *fname)
 {
 	fprintf(f->asm_, "\n\n");
-	fprintf(f->asm_, "; end of .asm disassembly of %s", fname);
+	fprintf(f->asm_, "; end of .asm disassembly of %s\n", fname);
 	fclose(f->asm_);
 
 	fprintf(f->lst, "\n\n");
-	fprintf(f->lst, "; end of .lst disassembly of %s", fname);
+	fprintf(f->lst, "; end of .lst disassembly of %s\n", fname);
 	fclose(f->lst);
 
 	fprintf(f->htm, "</table>\n");
@@ -1497,7 +1078,7 @@ void load_blob(const char *fname)
 static void help()
 {
 		fprintf(stderr,
-"dis [-m vax|sane] [-o <outname>] <binary>\n"
+"revax-dis [-m vax|sane] [-o <outname>] <binary>\n"
 "\n"
 "  inputs a VAX binary (raw or a.out) + possibly a <binary>.ctrl file with\n"
 "  hints for the disassembler.\n"
@@ -1516,12 +1097,19 @@ static void help_exit()
 
 int main(int argc, char *argv[])
 {
-	(void) op_len;
-
 	/* parse command line */
 
 	if (argc == 1) {
 		help();
+		exit(0);
+	}
+
+	if (strcmp(argv[1], "--version") == 0) {
+		printf("revax-dis %s (commit %s)\n", VERSION, GITHASH);
+		printf("compiled %s on %s with %s.\n", NOW, PLATFORM, CCVER);
+		printf("\n");
+		printf("  %s\n", REVAXURL);
+
 		exit(0);
 	}
 
@@ -1539,10 +1127,10 @@ int main(int argc, char *argv[])
 			if (i+1 < argc) {
 				i++;
 				if (strcmp(argv[i], "vax") == 0) {
-					format = FMT_VAX;
+//					format = FMT_VAX;
 					continue;
 				} else if (strcmp(argv[i], "sane") == 0) {
-					format = FMT_SANE;
+//					format = FMT_SANE;
 					continue;
 				}
 			}
@@ -1578,7 +1166,16 @@ int main(int argc, char *argv[])
 	detect_type(fname);
 	load_blob(fname);
 	blob_start = 0x20040000;
+printf("blob_size: %ld\n", blob_size);
 
+/* FIXME "written runtime/ka655x.bin.asm"
+         "written runtime/ka655x.bin.lst"
+         "written runtime/ka655x.bin/html/"
+
+         best if the filenames are easy to cut and paste
+
+         "Writing to:" before the disassembly is just as good.
+ */
 	dis(outf, 0, blob_size);
 //	dis(outf, 0, 0x22);
 //	dis(outf, 0x24, 0x100);

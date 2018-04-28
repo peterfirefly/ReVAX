@@ -137,7 +137,8 @@ vars:
 spaces:
 	misc/trailing-spaces.pl src/*.[ch] src/*.pl src/*.vu src/*.spec	\
 				misc/*.[ch] misc/*.pl misc/*.asm	\
-				runtime/*.c runtime/*.desc		\
+				vax-test/*.c vax-test/*.asm		\
+				vax-bin/*.desc				\
 				ods2/ods2-firefly.c			\
 				tables/*.txt tables/*.snip		\
 				doc/*.txt				\
@@ -165,11 +166,14 @@ tstdep:
 
 #asm:	src/asm.c src/shared.h src/vax-instr.h   src/op-asm.h src/op-val.h
 $(call DEP,revax-asm,src/asm.c)
-	$(CC) $(CFLAGS) $(DEF) $< -Isrc -o $@
+	$(CC) $(CFLAGS) $(DEF) $< -Isrc -lmpfr -lgmp -o $@
 
 #dis:	src/dis.c src/shared.h src/vax-instr.h   src/op-dis.h src/op-val.h
 $(call DEP,revax-dis,src/dis.c)
-	$(CC) $(CFLAGS) $(DEF) $< -Isrc -o $@
+	$(CC) $(CFLAGS) $(DEF) $< -Isrc -lmpfr -lgmp -o $@
+
+$(call DEP,revax-uop,src/uop.c)
+	$(CC) $(CFLAGS) $(DEF) $< -Isrc -lmpfr -lgmp -o $@
 
 #sim:	src/sim.c src/shared.h src/fragments.h src/dis-uop.h	\
 #	src/vax-instr.h src/vax-ucode.h src/vax-fraglists.h	\
@@ -285,7 +289,7 @@ headers:	src/vax-ucode.h src/vax-instr.h
 	$(CC) -c $(CFLAGS) -Isrc src/parse.h
 	$(CC) -c $(CFLAGS) -Isrc src/big-int.h
 	$(CC) -c $(CFLAGS) -Isrc src/fp.h
-#	$(CC) -c $(CFLAGS) -Isrc src/dis-uop.h
+	$(CC) -c $(CFLAGS) -Isrc src/dis-uop.h
 	$(CC) -c $(CFLAGS) -Isrc src/op-support.h
 	$(CC) -c $(CFLAGS) -Isrc src/op-asm-support.h
 	$(CC) -c $(CFLAGS) -Isrc src/op-dis-support.h
@@ -608,7 +612,7 @@ runtime/%.bin: runtime/%.c
 stats:	tables ops
 	@echo 'Total code size (without test code and experiments)'
 	@echo '---------------------------------------------------'
-	@wc src/asm.c src/dis.c src/sim.c				\
+	@wc src/asm.c src/dis.c src/sim.c src/uop.c			\
 	    \
 	    src/macros.h src/strret.h src/string-utils.h src/html.h src/reflow.h \
 	    src/parse.h src/big-int.h src/fp.h				\
@@ -635,7 +639,7 @@ stats:	tables ops
 	@echo ''
 	@echo 'Hand-written code'
 	@echo '-----------------'
-	@wc src/asm.c src/dis.c src/sim.c				\
+	@wc src/asm.c src/dis.c src/sim.c src/uop.c			\
 	    src/macros.h src/strret.h src/string-utils.h src/html.h src/reflow.h \
 	    src/parse.h src/big-int.h src/fp.h				\
 	    src/fragments.h						\
@@ -711,7 +715,7 @@ stats:	tables ops
 	@mkdir -p tmp
 	@# use tmp dir to control which files gets counted, use a different
 	@# name for the microcode so it counts as "asm".
-	@cp src/asm.c src/dis.c src/sim.c				\
+	@cp src/asm.c src/dis.c src/sim.c src/uop.c			\
 	    src/macros.h src/strret.h src/string-utils.h src/html.h src/reflow.h \
 	    src/parse.h src/big-int.h src/fp.h				\
 	    src/fragments.h						\
@@ -743,15 +747,18 @@ clean:	test-clean
 	   src/vax-instr.h src/vax-instr.pl src/vax-ucode.h	\
 	   src/vax-fraglists.h					\
 	   src/op-asm.h src/op-dis.h src/op-sim.h src/op-val.h	\
-	   runtime/test*.o runtime/test*.bin runtime/test.s	\
+	   src/*.gch						\
+	   vax-test/test*.o vax-test/test*.bin vax-test/test*.s	\
+	   vax-test/*.raw vax-test/*.raw.asm			\
 	   *.lst *.raw						\
 	   *.gcno *.gcda *.info src/*.gcno src/*.gcda
 	-@rm -rf cov/
-	-@rm -rf runtime/*asm runtime/*.lst runtime/*.html
+	-@rm -rf vax-bin/*.disasm  vax-bin/*.lst  vax-bin/*.html
+	-@rm -rf vax-test/*.disasm vax-test/*.lst vax-test/*.html
 	-@rm -f  cachegrind.out.*
 	-@rm -f  tags
 
 distclean:	clean
-	-@rm -f *~ doc/*~ src/*~ tables/*~ ods2/*~ runtime/*~  misc/*~
+	-@rm -f *~ doc/*~ src/*~ tables/*~ ods2/*~ vax-test/*~  vax-bin/*~ misc/*~
 
 

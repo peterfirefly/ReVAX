@@ -30,8 +30,6 @@
 /* worst-case is octo/h immediate operands: 1 opspec + 16 data bytes */
 #define MAX_OPLEN	17
 
-enum ifp	{ IFP_INT, IFP_F, IFP_D, IFP_G, IFP_H };
-
 
 struct fields {
 	int		Rn, Rx;
