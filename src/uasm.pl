@@ -1016,7 +1016,7 @@ foreach my $k ('s1', 's2', 'dst', 'imm', 'cc', 'utarget') {
 	}
 	printf "};\n";
 	printf "\n\n";
-	
+
 	# ustart[512]
 	printf "/* microcode labels -- instructions */\n";
 	print "unsigned ustart[512] = {\n";
