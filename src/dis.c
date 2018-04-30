@@ -96,7 +96,7 @@ STATIC struct dis_ret op_dis_sane(uint8_t b[MAX_OPLEN], uint32_t pc, int width, 
 
 uint32_t	blob_start;
 uint8_t		blob[1024*1024];
-size_t		blob_size;
+uint32_t	blob_size;
 
 
 /***/
@@ -1166,7 +1166,7 @@ int main(int argc, char *argv[])
 	detect_type(fname);
 	load_blob(fname);
 	blob_start = 0x20040000;
-printf("blob_size: %ld\n", blob_size);
+printf("blob_size: %d\n", blob_size);
 
 /* FIXME "written runtime/ka655x.bin.asm"
          "written runtime/ka655x.bin.lst"
