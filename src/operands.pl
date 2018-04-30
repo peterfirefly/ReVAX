@@ -702,7 +702,7 @@ sub handle_dis_syntax($) {
 		my $indent = "\t" x (1 + scalar @bytes);
 
 		printf "%sstruct dis_ret\tret;\n", $indent;
-		printf "%sint\t\tidx = 0;\n", $indent;
+		printf "%sunsigned\tidx = 0;\n", $indent;
 		printf "\n";
 
 		# struct fields?
@@ -806,10 +806,12 @@ done:
 			my $s = $action;
 			while ($s ne '') {
 				if    ($s =~ s/^<width>//) {
-					print  $indent, "idx += sprintf(ret.str+idx, \"%d\", width);\n";
+					print  $indent, "if (idx < sizeof(ret.str))\n";
+					print  $indent, "\tidx += snprintf(ret.str+idx, sizeof(ret.str)-idx,\"%d\", width);\n";
 				} elsif ($s =~ s/^<([a-zA-Z0-9_]+):([a-zA-Z0-9_]+)>//) {
 					#          ---------   ---------
-					print  $indent, "idx += sprintf(ret.str+idx, \"%s\", str_$2(fields.$1, pc, width, ifp).str);\n";
+					print  $indent, "if (idx < sizeof(ret.str))\n";
+					print  $indent, "\tidx += snprintf(ret.str+idx, sizeof(ret.str)-idx, \"%s\", str_$2(fields.$1, pc, width, ifp).str);\n";
 				} else {
 					printf "%sret.str[idx++] = '%s';\n", $indent, substr($s, 0, 1);
 					$s =~ s/^.//;
