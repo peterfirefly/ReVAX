@@ -42,6 +42,7 @@ struct bigstr_ret html_escape(const char *s, bool nbsp)
 		case ' ': if (nbsp) {
 				sprintf(p, "&nbsp;"); p+=6;  break;
 			  }
+			  /* fall-through */
 		default:
 			*p++ = *s;
 		}
