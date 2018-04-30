@@ -438,7 +438,7 @@ found_instr:
 					fprintf(stderr, "line %d, operand %d: write/modify operands can't be short literals.\n", lineno, opidx+1);
 					return false;
 				  }
-				  if ((b[0] == 0x8F)) {
+				  if (b[0] == 0x8F) {
 				  	fprintf(stderr, "line %d, operand %d: write/modify operands can't be immediates.\n", lineno, opidx+1);
 				  	return false;
 				  }
@@ -452,7 +452,7 @@ found_instr:
 					fprintf(stderr, "line %d, operand %d: address operands can't be short literals.\n", lineno, opidx+1);
 					return false;
 				  }
-				  if ((b[0] == 0x8F)) {
+				  if (b[0] == 0x8F) {
 				  	fprintf(stderr, "line %d, operand %d: address operands can't be immediates.\n", lineno, opidx+1);
 				  	return false;
 				  }
