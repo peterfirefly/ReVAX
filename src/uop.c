@@ -363,96 +363,96 @@ int main(int argc, char *argv[argc])
 	/* let's analyze some VAX instructions */
 
 	/* simple instructions */
-	analyze(3, (uint8_t []) {0x80, 0x51, 0x52});			/*     ADDB2   r1, r2         */
-	analyze(3, (uint8_t []) {0xA0, 0x51, 0x52});			/*     ADDW2   r1, r2         */
-	analyze(3, (uint8_t []) {0xC0, 0x51, 0x52});			/*     ADDL2   r1, r2         */
-	analyze(4, (uint8_t []) {0x81, 0x51, 0x52, 0x53});		/*     ADDB3   r1, r2, r3     */
+	analyze(3, (uint8_t []) {0x80, 0x51, 0x52});			   /* ADDB2   r1, r2            */
+	analyze(3, (uint8_t []) {0xA0, 0x51, 0x52});			   /* ADDW2   r1, r2            */
+	analyze(3, (uint8_t []) {0xC0, 0x51, 0x52});			   /* ADDL2   r1, r2            */
+	analyze(4, (uint8_t []) {0x81, 0x51, 0x52, 0x53});		   /* ADDB3   r1, r2, r3        */
 
 	/* all addressing modes */
-	analyze(3, (uint8_t []) {0xD0, 0x17, 0x57});				/* MOVL   S^#23, r7		*/
-	analyze(7, (uint8_t []) {0xD0, 0x8F, 0xD2, 0x04, 0x00, 0x00, 0x58});	/* MOVL	  I^1234, r8		*/
+	analyze(3, (uint8_t []) {0xD0, 0x17, 0x57});			   /* MOVL   S^#23, r7          */
+	analyze(7, (uint8_t []) {0xD0, 0x8F, 0xD2,0x04,0x00,0x00, 0x58});  /* MOVL   I^1234, r8         */
 
-	analyze(2, (uint8_t []) {0x94, 0x50});					/* CLRB   r0			*/
-	analyze(2, (uint8_t []) {0x94, 0x60});					/* CLRB   (r0)			*/
-	analyze(2, (uint8_t []) {0x94, 0x70});					/* CLRB   -(r0)			*/
-	analyze(2, (uint8_t []) {0x94, 0x80});					/* CLRB   (r0)+			*/
-	analyze(2, (uint8_t []) {0x94, 0x90});					/* CLRB   @(r0)+		*/
-	analyze(6, (uint8_t []) {0x94, 0x9F, 0x78, 0x56, 0x34, 0x12});		/* CLRB   @#0x1234_5678		*/
+	analyze(2, (uint8_t []) {0x94, 0x50});				   /* CLRB   r0                 */
+	analyze(2, (uint8_t []) {0x94, 0x60});				   /* CLRB   (r0)               */
+	analyze(2, (uint8_t []) {0x94, 0x70});				   /* CLRB   -(r0)              */
+	analyze(2, (uint8_t []) {0x94, 0x80});				   /* CLRB   (r0)+              */
+	analyze(2, (uint8_t []) {0x94, 0x90});				   /* CLRB   @(r0)+             */
+	analyze(6, (uint8_t []) {0x94, 0x9F, 0x78,0x56,0x34,0x12});	   /* CLRB   @#0x1234_5678      */
 
-	analyze(3, (uint8_t []) {0x94, 0x41, 0x60});				/* CLRB   (r0)[r1]		*/
-	analyze(3, (uint8_t []) {0x94, 0x41, 0x70});				/* CLRB   -(r0)[r1]		*/
-	analyze(3, (uint8_t []) {0x94, 0x41, 0x80});				/* CLRB   (r0)+[r1]		*/
-	analyze(3, (uint8_t []) {0x94, 0x41, 0x90});				/* CLRB   @(r0)+[r1]		*/
-	analyze(7, (uint8_t []) {0x94, 0x41, 0x9F, 0x78, 0x56, 0x34, 0x12});	/* CLRB   @#0x1234_5678[r1]	*/
+	analyze(3, (uint8_t []) {0x94, 0x41, 0x60});			   /* CLRB   (r0)[r1]           */
+	analyze(3, (uint8_t []) {0x94, 0x41, 0x70});			   /* CLRB   -(r0)[r1]          */
+	analyze(3, (uint8_t []) {0x94, 0x41, 0x80});			   /* CLRB   (r0)+[r1]          */
+	analyze(3, (uint8_t []) {0x94, 0x41, 0x90});			   /* CLRB   @(r0)+[r1]         */
+	analyze(7, (uint8_t []) {0x94, 0x41, 0x9F, 0x78,0x56,0x34,0x12});  /* CLRB   @#0x1234_5678[r1]  */
 
-	analyze(3, (uint8_t []) {0x94, 0xA1, 0x02});				/* CLRB   B^2(r1)		*/
-	analyze(3, (uint8_t []) {0x94, 0xAF, 0xDB});				/* CLRB   B^0x2004_0002 	*/
-	analyze(3, (uint8_t []) {0x94, 0xB1, 0x02});				/* CLRB   @B^2(r1)		*/
-	analyze(3, (uint8_t []) {0x94, 0xBF, 0xD5});				/* CLRB   @B^0x2004_0002	*/
+	analyze(3, (uint8_t []) {0x94, 0xA1, 0x02});			   /* CLRB   B^2(r1)            */
+	analyze(3, (uint8_t []) {0x94, 0xAF, 0xDB});			   /* CLRB   B^0x2004_0002      */
+	analyze(3, (uint8_t []) {0x94, 0xB1, 0x02});			   /* CLRB   @B^2(r1)           */
+	analyze(3, (uint8_t []) {0x94, 0xBF, 0xD5});			   /* CLRB   @B^0x2004_0002     */
 
-	analyze(4, (uint8_t []) {0x94, 0xC1, 0x02, 0x00});			/* CLRB   W^2(r1)		*/
-	analyze(4, (uint8_t []) {0x94, 0xCF, 0xCE, 0xFF});			/* CLRB   W^0x2004_0002		*/
-	analyze(4, (uint8_t []) {0x94, 0xD1, 0x02, 0x00});			/* CLRB   @W^2(r1)		*/
-	analyze(4, (uint8_t []) {0x94, 0xDF, 0xC6, 0xFF});			/* CLRB   @W^0x2004_0002	*/
+	analyze(4, (uint8_t []) {0x94, 0xC1, 0x02,0x00});		   /* CLRB   W^2(r1)            */
+	analyze(4, (uint8_t []) {0x94, 0xCF, 0xCE,0xFF});		   /* CLRB   W^0x2004_0002      */
+	analyze(4, (uint8_t []) {0x94, 0xD1, 0x02,0x00});		   /* CLRB   @W^2(r1)           */
+	analyze(4, (uint8_t []) {0x94, 0xDF, 0xC6,0xFF});		   /* CLRB   @W^0x2004_0002     */
 
-	analyze(6, (uint8_t []) {0x94, 0xE1, 0x02, 0x00, 0x00, 0x00});		/* CLRB   L^2(r1)		*/
-	analyze(6, (uint8_t []) {0x94, 0xEF, 0xBC, 0xFF, 0xFF, 0xFF});		/* CLRB   L^0x2004_0002 	*/
-	analyze(6, (uint8_t []) {0x94, 0xF1, 0x02, 0x00, 0x00, 0x00});		/* CLRB   @L^2(r1)		*/
-	analyze(6, (uint8_t []) {0x94, 0xFF, 0xB0, 0xFF, 0xFF, 0xFF});		/* CLRB   @L^0x2004_0002	*/
+	analyze(6, (uint8_t []) {0x94, 0xE1, 0x02,0x00,0x00,0x00});	   /* CLRB   L^2(r1)            */
+	analyze(6, (uint8_t []) {0x94, 0xEF, 0xBC,0xFF,0xFF,0xFF});	   /* CLRB   L^0x2004_0002      */
+	analyze(6, (uint8_t []) {0x94, 0xF1, 0x02,0x00,0x00,0x00});	   /* CLRB   @L^2(r1)           */
+	analyze(6, (uint8_t []) {0x94, 0xFF, 0xB0,0xFF,0xFF,0xFF});	   /* CLRB   @L^0x2004_0002     */
 
-	analyze(4, (uint8_t []) {0x94, 0x42, 0xA1, 0x02});			/* CLRB   B^2(r1)[r2]		*/
-	analyze(4, (uint8_t []) {0x94, 0x42, 0xAF, 0xA6});			/* CLRB   B^0x2004_0002[r2]	*/
-	analyze(4, (uint8_t []) {0x94, 0x42, 0xB1, 0x02});			/* CLRB   @B^2(r1)[r2]		*/
-	analyze(4, (uint8_t []) {0x94, 0x42, 0xBF, 0x9E});			/* CLRB   @B^0x2004_0002[r2]	*/
+	analyze(4, (uint8_t []) {0x94, 0x42, 0xA1, 0x02});		   /* CLRB   B^2(r1)[r2]        */
+	analyze(4, (uint8_t []) {0x94, 0x42, 0xAF, 0xA6});		   /* CLRB   B^0x2004_0002[r2]  */
+	analyze(4, (uint8_t []) {0x94, 0x42, 0xB1, 0x02});		   /* CLRB   @B^2(r1)[r2]       */
+	analyze(4, (uint8_t []) {0x94, 0x42, 0xBF, 0x9E});		   /* CLRB   @B^0x2004_0002[r2] */
 
-	analyze(5, (uint8_t []) {0x94, 0x42, 0xC1, 0x02, 0x00});		/* CLRB   W^2(r1)[r2]		*/
-	analyze(5, (uint8_t []) {0x94, 0x42, 0xCF, 0x95, 0xFF});		/* CLRB   W^0x2004_0002[r2]	*/
-	analyze(5, (uint8_t []) {0x94, 0x42, 0xD1, 0x02, 0x00});		/* CLRB   @W^2(r1)[r2]		*/
-	analyze(5, (uint8_t []) {0x94, 0x42, 0xDF, 0x8B, 0xFF});		/* CLRB   @W^0x2004_0002[r2]	*/
+	analyze(5, (uint8_t []) {0x94, 0x42, 0xC1, 0x02,0x00});		   /* CLRB   W^2(r1)[r2]        */
+	analyze(5, (uint8_t []) {0x94, 0x42, 0xCF, 0x95,0xFF});		   /* CLRB   W^0x2004_0002[r2]  */
+	analyze(5, (uint8_t []) {0x94, 0x42, 0xD1, 0x02,0x00});		   /* CLRB   @W^2(r1)[r2]       */
+	analyze(5, (uint8_t []) {0x94, 0x42, 0xDF, 0x8B,0xFF});		   /* CLRB   @W^0x2004_0002[r2] */
 
-	analyze(7, (uint8_t []) {0x94, 0x42, 0xE1, 0x02, 0x00, 0x00, 0x00});	/* CLRB   L^2(r1)[r2]		*/
-	analyze(7, (uint8_t []) {0x94, 0x42, 0xEF, 0x7F, 0xFF, 0xFF, 0xFF});	/* CLRB   L^0x2004_0002[r2]	*/
-	analyze(7, (uint8_t []) {0x94, 0x42, 0xF1, 0x02, 0x00, 0x00, 0x00});	/* CLRB   @L^2(r1)[r2]		*/
-	analyze(7, (uint8_t []) {0x94, 0x42, 0xFF, 0x71, 0xFF, 0xFF, 0xFF});	/* CLRB   @L^0x2004_0002[r2]	*/
+	analyze(7, (uint8_t []) {0x94, 0x42, 0xE1, 0x02,0x00,0x00,0x00});  /* CLRB   L^2(r1)[r2]        */
+	analyze(7, (uint8_t []) {0x94, 0x42, 0xEF, 0x7F,0xFF,0xFF,0xFF});  /* CLRB   L^0x2004_0002[r2]  */
+	analyze(7, (uint8_t []) {0x94, 0x42, 0xF1, 0x02,0x00,0x00,0x00});  /* CLRB   @L^2(r1)[r2]       */
+	analyze(7, (uint8_t []) {0x94, 0x42, 0xFF, 0x71,0xFF,0xFF,0xFF});  /* CLRB   @L^0x2004_0002[r2] */
 
 	/* branches */
-	analyze(2, (uint8_t []) {0x12, 0xFE});				/* L1: BNEQ    L1			*/
-	analyze(3, (uint8_t []) {0x31, 0xFB, 0xFF});			/*     BRW     L1			*/
-	analyze(6, (uint8_t []) {0x3D, 0x51, 0x52, 0x53, 0xF5, 0xFF});	/*     ACBW    r1, r2, r3, L1		*/
-	analyze(3, (uint8_t []) {0xF4, 0x51, 0xF2});			/*     SOBGEQ  r1, L1			*/
-	analyze(4, (uint8_t []) {0xF3, 0x51, 0x52, 0xEE});		/*     AOBLEQ  r1, r2, L1		*/
-	analyze(3, (uint8_t []) {0xE8, 0x50, 0xEB});			/*     BLBS    r0, L1			*/
-	analyze(4, (uint8_t []) {0xE2, 0x50, 0x51, 0xE7});		/*     BBSS    r0, r1, L1		*/
+	analyze(2, (uint8_t []) {0x12, 0xFE});			       /* L1: BNEQ    L1                 */
+	analyze(3, (uint8_t []) {0x31, 0xFB, 0xFF});		       /*     BRW     L1                 */
+	analyze(6, (uint8_t []) {0x3D, 0x51, 0x52, 0x53, 0xF5,0xFF});  /*     ACBW    r1, r2, r3, L1     */
+	analyze(3, (uint8_t []) {0xF4, 0x51, 0xF2});		       /*     SOBGEQ  r1, L1             */
+	analyze(4, (uint8_t []) {0xF3, 0x51, 0x52, 0xEE});	       /*     AOBLEQ  r1, r2, L1         */
+	analyze(3, (uint8_t []) {0xE8, 0x50, 0xEB});		       /*     BLBS    r0, L1             */
+	analyze(4, (uint8_t []) {0xE2, 0x50, 0x51, 0xE7});	       /*     BBSS    r0, r1, L1         */
 
 	/* all fragment groups */
 
 	/* rb/rw/rl/rf */
-	analyze(2, (uint8_t []) {0x95, 0x50});				/* L2: TSTB   r0			*/
+	analyze(2, (uint8_t []) {0x95, 0x50});			       /* L2: TSTB   r0                  */
 	/* rq/rd/rg */
-	analyze(3, (uint8_t []) {0x7D, 0x50, 0x52});			/*     MOVQ   r0, r2			*/
+	analyze(3, (uint8_t []) {0x7D, 0x50, 0x52});		       /*     MOVQ   r0, r2              */
 	/* mb/mw/ml/mf */
-	analyze(2, (uint8_t []) {0x96, 0x50});				/*     INCB   r0			*/
+	analyze(2, (uint8_t []) {0x96, 0x50});			       /*     INCB   r0                  */
 	/* mi */
-	analyze(3, (uint8_t []) {0x58, 0x02, 0x50});			/*     ADAWI  S^#0x0002, r0		*/
-	analyze(3, (uint8_t []) {0x58, 0x02, 0x60});			/*     ADAWI  S^#0x0002, (r0)		*/
+	analyze(3, (uint8_t []) {0x58, 0x02, 0x50});		       /*     ADAWI  S^#0x0002, r0       */
+	analyze(3, (uint8_t []) {0x58, 0x02, 0x60});		       /*     ADAWI  S^#0x0002, (r0)     */
 	/* mq/md/mg */
-	analyze(3, (uint8_t []) {0x60, 0x50, 0x52});			/*     ADDDD2 r0, r2			*/
+	analyze(3, (uint8_t []) {0x60, 0x50, 0x52});		       /*     ADDDD2 r0, r2              */
 	/* wb/ww/wl/wf */
-	analyze(2, (uint8_t []) {0x94, 0x50});				/*     CLRB   r0			*/
+	analyze(2, (uint8_t []) {0x94, 0x50});			       /*     CLRB   r0                  */
 	/* wq/wd/wg */
-	analyze(2, (uint8_t []) {0x7C, 0x50});				/*     CLRQ   r0			*/
+	analyze(2, (uint8_t []) {0x7C, 0x50});			       /*     CLRQ   r0                  */
 	/* ab/aw/al/aq */
-	analyze(2, (uint8_t []) {0x9F, 0x60});				/*     PUSHAB (r0)			*/
+	analyze(2, (uint8_t []) {0x9F, 0x60});			       /*     PUSHAB (r0)                */
 	/* vr */
-	analyze(5, (uint8_t []) {0xEE, 0x00, 0x03, 0x60, 0x51});	/*     EXTV   S^#0, S^#3, (r0), r1	*/
+	analyze(5, (uint8_t []) {0xEE, 0x00, 0x03, 0x60, 0x51});       /*     EXTV   S^#0, S^#3, (r0), r1 */
 	/* vm */
-	analyze(5, (uint8_t []) {0xF0, 0x51, 0x00, 0x03, 0x60});	/*     INSV   r1, S^#0, S^#3, (r0)	*/
+	analyze(5, (uint8_t []) {0xF0, 0x51, 0x00, 0x03, 0x60});       /*     INSV   r1, S^#0, S^#3, (r0) */
 	/* v1 */
-	analyze(4, (uint8_t []) {0xE0, 0x00, 0x60, 0xDC});		/*     BBS    S^#0, (r0), L2		*/
+	analyze(4, (uint8_t []) {0xE0, 0x00, 0x60, 0xDC});	       /*     BBS    S^#0, (r0), L2      */
 	/* vi */
-	analyze(4, (uint8_t []) {0xE6, 0x00, 0x60, 0xD8});		/*     BBSSI  S^#0, (r0), L2		*/
+	analyze(4, (uint8_t []) {0xE6, 0x00, 0x60, 0xD8});	       /*     BBSSI  S^#0, (r0), L2      */
 	/* bb/bw */
-	analyze(2, (uint8_t []) {0x11, 0xD6});				/*     BRB    L2			*/
+	analyze(2, (uint8_t []) {0x11, 0xD6});			       /*     BRB    L2                  */
 
 	return EXIT_SUCCESS;
 }
