@@ -8,6 +8,14 @@
 
  */
 
+/* necessary for clock_gettime() and related types and constants.
+
+   (If the compiler is invoked with -std=gnu99 -- or if it defaults to that
+   -- then this #define is unnecessary.
+   It has to be there if the compiler is invoked with -std=c99.)
+ */
+#define _POSIX_C_SOURCE 199309L
+
 #include <assert.h>
 #include <ctype.h>
 #include <stdbool.h>
