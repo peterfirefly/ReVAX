@@ -1350,6 +1350,8 @@ void test_asm()
 			case IFP_D:	s = "D";    break;
 			case IFP_G:	s = "G";    break;
 			case IFP_H:	s = "H";    break;
+			default:
+				UNREACHABLE();
 			}
 
 			printf("%3d/%3d: %2d %3s  |%s| \n", tst, (int) ARRAY_SIZE(asm_vax),
