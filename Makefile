@@ -5,7 +5,7 @@
 ###
 
 CC=gcc
-CFLAGS=-O2 -W -Wall
+CFLAGS=-O2 -W -Wall -std=c99
 
 COV=-fprofile-arcs -ftest-coverage
 DBG=-g
