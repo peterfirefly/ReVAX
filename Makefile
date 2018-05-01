@@ -11,6 +11,7 @@ COV=-fprofile-arcs -ftest-coverage
 DBG=-g
 SAN-CLANG=-fsanitize=undefined,unsigned-integer-overflow
 SAN-GCC=-fsanitize=undefined,leak
+#SAN-CC=-fsanitize=undefined,leak
 
 CLANG=clang-5.0
 GCC=gcc
@@ -327,31 +328,31 @@ tests:	test-big-int test-fp test-op test-alu test-analyze test-dis-uop
 
 #test-big-int:	misc/test-big-int.c src/big-int.h src/shared.h
 $(call DEP,test-big-int,misc/test-big-int.c)
-	$(CC) $(CFLAGS) -g -fsanitize=undefined,leak $< -Isrc -lmpfr -lgmp -o $@
+	$(CC) $(CFLAGS) -g $(SAN-CC) $< -Isrc -lmpfr -lgmp -o $@
 
 #test-fp:	misc/test-fp.c src/big-int.h src/shared.h
 $(call DEP,test-fp,misc/test-fp.c)
-	$(CC) $(CFLAGS) -g -fsanitize=undefined,leak $< -Isrc -lmpfr -lgmp -o $@
+	$(CC) $(CFLAGS) -g $(SAN-CC) $< -Isrc -lmpfr -lgmp -o $@
 
 #test-op:	misc/test-op.c src/big-int.h src/shared.h	\
 #		src/op-support.h src/op-asm.h src/op-dis.h src/op-sim.h src/op-val.h
 $(call DEP,test-op,misc/test-op.c)
-	$(CC) $(CFLAGS) -g -fsanitize=undefined,leak $< -Isrc -lmpfr -lgmp -o $@
+	$(CC) $(CFLAGS) -g $(SAN-CC) $< -Isrc -lmpfr -lgmp -o $@
 
 #test-alu:	misc/test-alu.c src/shared.h
 $(call DEP,test-alu,misc/test-alu.c)
-	$(CC) $(CFLAGS) -g -fsanitize=undefined,leak $< -Isrc -o $@
+	$(CC) $(CFLAGS) -g $(SAN-CC) $< -Isrc -o $@
 
 #test-analyze:	misc/test-analyze.c src/shared.h		\
 #		src/vax-instr.h src/vax-ucode.h			\
 #		src/op-support.h src/op-sim.h src/op-val.h
 $(call DEP,test-analyze,misc/test-analyze.c)
-	$(CC) $(CFLAGS) -g -fsanitize=undefined,leak $< -Isrc -o $@
+	$(CC) $(CFLAGS) -g $(SAN-CC) $< -Isrc -o $@
 
 #test-dis-uop:	misc/test-dis-uop.c src/dis-uop.h src/shared.h	\
 #		src/vax-instr.h src/vax-ucode.h
 $(call DEP,test-dis-uop,misc/test-dis-uop.c)
-	$(CC) $(CFLAGS) -g -fsanitize=undefined,leak $< -Isrc -o $@
+	$(CC) $(CFLAGS) -g $(SAN-CC) $< -Isrc -o $@
 
 
 
@@ -444,17 +445,17 @@ afl-tests:	afl-test-big-int afl-test-fp afl-test-op #afl-test-alu afl-test-analy
 # ordinary built-in tests, compile with -fsanitize=undefined
 #afl-test-big-int:	misc/test-big-int.c src/big-int.h src/shared.h check-afl
 $(call DEP,afl-test-big-int,misc/test-big-int.c) check-afl
-	afl-clang-fast $(CFLAGS) -fsanitize=undefined,leak -Isrc $< -lmpfr -lgmp -o $@
+	afl-clang-fast $(CFLAGS) $(SAN-CC) -Isrc $< -lmpfr -lgmp -o $@
 
 #afl-test-fp:	misc/test-fp.c src/big-int.h src/shared.h check-afl
 $(call DEP,afl-test-fp,misc/test-fp.c) check-afl
-	afl-clang-fast $(CFLAGS) -fsanitize=undefined,leak -Isrc $< -lmpfr -lgmp -o $@
+	afl-clang-fast $(CFLAGS) $(SAN-CC) -Isrc $< -lmpfr -lgmp -o $@
 
 #afl-test-op:	misc/test-op.c src/big-int.h src/shared.h		\
 #		src/vax-ucode.h src/op-support.h src/op-asm.h src/op-dis.h src/op-sim.h src/op-val.h \
 #		check-afl
 $(call DEP,afl-test-op,misc/test-op.c) check-afl
-	afl-clang-fast $(CFLAGS) -fsanitize=undefined,leak -Isrc $< -lmpfr -lgmp -o $@
+	afl-clang-fast $(CFLAGS) $(SAN-CC) -Isrc $< -lmpfr -lgmp -o $@
 
 
 
