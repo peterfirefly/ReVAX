@@ -332,7 +332,7 @@ $(call DEP,test-big-int,misc/test-big-int.c)
 
 #test-fp:	misc/test-fp.c src/big-int.h src/shared.h
 $(call DEP,test-fp,misc/test-fp.c)
-	$(CC) $(CFLAGS) -g $(SAN-CC) $< -Isrc -lmpfr -lgmp -o $@
+	$(CC) $(CFLAGS) -g $(SAN-CC) $< -Isrc -lmpfr -lgmp -lm -o $@
 
 #test-op:	misc/test-op.c src/big-int.h src/shared.h	\
 #		src/op-support.h src/op-asm.h src/op-dis.h src/op-sim.h src/op-val.h

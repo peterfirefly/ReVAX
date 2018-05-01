@@ -30,6 +30,14 @@
 
  */
 
+/* necessary for mrand48().
+
+   (If the compiler is invoked with -std=gnu99 -- or if it defaults to that
+   -- then this #define is unnecessary.
+   It has to be there if the compiler is invoked with -std=c99.)
+ */
+#define _XOPEN_SOURCE
+
 #include <assert.h>
 #include <math.h>
 #include <stdint.h>
@@ -591,7 +599,7 @@ bool within_1ulp(struct big_int f, struct big_int g, char type)
 
 void experiment_fp()
 {
-	struct big_int	fp = {};
+	struct big_int	fp = {{0}};
 
 	fp.val[0] = 0x209B3F9A; /* 'f' for Log10(2) = 0.301029996 */
 	printf(" log_10(2) = %e %f %.10g\n", log10f(2.0), log10f(2.0), log10f(2.0));
