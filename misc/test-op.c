@@ -2813,7 +2813,7 @@ void dump_afl(struct afl_input afl)
 
 struct afl_input afl_input_bin()
 {
-	struct afl_input	afl = {};
+	struct afl_input	afl = {.width=0};
 
 	afl.cnt = fread(afl.b, 1, MAX_OPLEN, stdin);
 
@@ -2891,7 +2891,7 @@ void afl_dis()
 
 void afl_sim_once(struct afl_input afl)
 {
-	struct fields fields = {};
+	struct fields fields = {.Rn=0};
 	memset(&fields, 0xFF, sizeof(fields));
 
 	struct sim_ret sim_ret = op_sim(afl.b, &fields, afl.width, afl.ifp);

@@ -60,7 +60,7 @@
 
 struct str_ret output_fp(double x)
 {
-	struct str_ret	buf = {};
+	struct str_ret	buf = {{0}};
 	mpfr_t		bigx;
 
 	mpfr_clear_flags();

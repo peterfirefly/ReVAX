@@ -162,7 +162,7 @@ static bool parse_bigint(struct big_int *x, int width)
 	   [+-]0x[0-9A-Fa-f][0-9A-Fa-f_]*
 	 */
 
-	struct big_int	tmp = {};
+	struct big_int	tmp = {{0}};
 	bool		neg = false;
 	char		ch;
 

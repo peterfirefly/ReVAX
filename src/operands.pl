@@ -432,7 +432,7 @@ sub handle_asm_syntax($) {
 	printf " */\n";
 	printf "STATIC int op_asm_%s(uint8_t b[MAX_OPLEN], uint32_t pc, int width, enum ifp ifp)\n", $syntax;
 	printf "{\n";
-	printf "\tstruct fields\tfields = {};\n";
+	printf "\tstruct fields\tfields = {.Rn=0};\n";
 	printf "\n";
 	printf "\tparse_skipws();\t/* parse_chx() doesn't skip whitespace */\n";
 	printf "\n";
