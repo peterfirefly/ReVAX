@@ -2560,7 +2560,7 @@ void time_asm()
 		uint8_t	b[MAX_OPLEN];
 
 		parse_init(asm_vax[i].str);
-		(volatile int) op_asm_vax(b, 0xCAFEBABE, asm_vax[i].width, asm_vax[i].ifp);
+		(volatile void) op_asm_vax(b, 0xCAFEBABE, asm_vax[i].width, asm_vax[i].ifp);
 		parse_done();
 	}
 }
@@ -2569,7 +2569,7 @@ void time_asm()
 void time_dis()
 {
 	for (unsigned i=0; i < ARRAY_SIZE(dis_vax); i++) {
-		(volatile struct dis_ret) op_dis_vax(dis_vax[i].b, 0xCAFEBABE, dis_vax[i].width, dis_vax[i].ifp);
+		(volatile void) op_dis_vax(dis_vax[i].b, 0xCAFEBABE, dis_vax[i].width, dis_vax[i].ifp);
 	}
 }
 
@@ -2579,7 +2579,7 @@ void time_sim()
 	for (unsigned i=0; i < ARRAY_SIZE(dis_vax); i++) {
 		struct fields	fields;
 
-		(volatile struct sim_ret) op_sim(dis_vax[i].b, &fields, dis_vax[i].width, dis_vax[i].ifp);
+		(volatile void) op_sim(dis_vax[i].b, &fields, dis_vax[i].width, dis_vax[i].ifp);
 	}
 }
 
@@ -2587,7 +2587,7 @@ void time_sim()
 void time_val()
 {
 	for (unsigned i=0; i < ARRAY_SIZE(dis_vax); i++) {
-		(volatile bool) op_val(dis_vax[i].b, asm_vax[i].width);
+		(volatile void) op_val(dis_vax[i].b, asm_vax[i].width);
 	}
 }
 
@@ -2712,7 +2712,7 @@ void time_op_asm(unsigned cnt)
 			uint8_t	b[MAX_OPLEN];
 
 			parse_init(asm_vax[i].str);
-			(volatile int) op_asm_vax(b, 0xCAFEBABE, asm_vax[i].width, asm_vax[i].ifp);
+			(volatile void) op_asm_vax(b, 0xCAFEBABE, asm_vax[i].width, asm_vax[i].ifp);
 			parse_done();
 		}
 	}
@@ -2724,7 +2724,7 @@ void time_op_dis(unsigned cnt)
 {
 	while (cnt--) {
 		for (unsigned i=0; i < ARRAY_SIZE(dis_vax); i++) {
-			(volatile struct dis_ret) op_dis_vax(dis_vax[i].b, 0xCAFEBABE, dis_vax[i].width, dis_vax[i].ifp);
+			(volatile void) op_dis_vax(dis_vax[i].b, 0xCAFEBABE, dis_vax[i].width, dis_vax[i].ifp);
 		}
 	}
 }
@@ -2737,7 +2737,7 @@ void time_op_sim(unsigned cnt)
 		for (unsigned i=0; i < ARRAY_SIZE(dis_vax); i++) {
 			struct fields	fields;
 
-			(volatile struct sim_ret) op_sim(dis_vax[i].b, &fields, dis_vax[i].width, dis_vax[i].ifp);
+			(volatile void) op_sim(dis_vax[i].b, &fields, dis_vax[i].width, dis_vax[i].ifp);
 		}
 	}
 }
@@ -2748,7 +2748,7 @@ void time_op_val(unsigned cnt)
 {
 	while (cnt--) {
 		for (unsigned i=0; i < ARRAY_SIZE(dis_vax); i++) {
-			(volatile bool) op_val(dis_vax[i].b, asm_vax[i].width);
+			(volatile void) op_val(dis_vax[i].b, asm_vax[i].width);
 		}
 	}
 }
