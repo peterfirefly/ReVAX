@@ -19,7 +19,7 @@
 
 int main()
 {
-	dis_uinstr(0, ARRAY_SIZE(ucode), ucode);
+	dis_uinstr(0, ARRAY_SIZE(ucode), DIS_CONT, ucode);
 
 	return EXIT_SUCCESS;
 }
