@@ -52,12 +52,14 @@ test-fp
 test-op
 test-alu
 test-analyze
+test-dis-uop
 
 test-big-int-nosan
 test-fp-nosan
 test-op-nosan
 test-alu-nosan
 test-analyze-nosan
+test-dis-uop-nosan
 
 afl-test-big-int
 afl-test-fp
