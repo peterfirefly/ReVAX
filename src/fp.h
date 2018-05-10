@@ -328,7 +328,7 @@ static bool fp_from_str(struct big_int *x, const char *s, char type)
 			             (neg              << 15)               |
 			             (expfield         <<  4)               |
 			            ((fp[0]._mpfr_d[1] <<  5) & 0xFFFF0000);    /* frac2 */
-			x->val[0] = ((fp[0]._mpfr_d[1] <<  5) &     0xFFE0) |   /* frac1 (hi) */
+			x->val[1] = ((fp[0]._mpfr_d[1] <<  5) &     0xFFE0) |   /* frac1 (hi) */
 			            ((fp[0]._mpfr_d[0] >> 27) &       0x1F) |   /* frac1 (lo) */
 			            ((fp[0]._mpfr_d[0] <<  5) & 0xFFFF0000);    /* frac 0 */
 			break;
