@@ -213,10 +213,22 @@ static bool fp_from_str(struct big_int *x, const char *s, char type)
 			return false;
 		}
 
-		x->val[0] = ((fp[0]._mpfr_d[0] >> 56) &       0x7F) |   /* frac1 */
-		             (neg              << 15)               |
-		             (expfield         <<  7)               |
-		            ((fp[0]._mpfr_d[0] >> 24) & 0xFFFF0000);    /* frac0 */
+		switch (mp_bits_per_limb) {
+		case 32:
+			x->val[0] = ((fp[0]._mpfr_d[0] >> 24) &       0x7F) |   /* frac1 */
+			             (neg              << 15)               |
+			             (expfield         <<  7)               |
+			            ((fp[0]._mpfr_d[0] <<  8) & 0xFFFF0000);    /* frac0 */
+			break;
+		case 64:
+			x->val[0] = ((fp[0]._mpfr_d[0] >> 56) &       0x7F) |   /* frac1 */
+			             (neg              << 15)               |
+			             (expfield         <<  7)               |
+			            ((fp[0]._mpfr_d[0] >> 24) & 0xFFFF0000);    /* frac0 */
+			break;
+		default:
+			UNREACHABLE();
+		}
 		x->val[1] = 0;
 		x->val[2] = 0;
 		x->val[3] = 0;
@@ -254,12 +266,27 @@ static bool fp_from_str(struct big_int *x, const char *s, char type)
 			return false;
 		}
 
-		x->val[0] = ((fp[0]._mpfr_d[0] >> 56) &       0x7F) |   /* frac3 */
-		             (neg              << 15)               |
-		             (expfield         <<  7)               |
-		            ((fp[0]._mpfr_d[0] >> 24) & 0xFFFF0000);    /* frac2 */
-		x->val[1] = ((fp[0]._mpfr_d[0] >> 24) &     0xFFFF) |   /* frac1 */
-		            ((fp[0]._mpfr_d[0] <<  8) & 0xFFFF0000);    /* frac0 */
+		switch (mp_bits_per_limb) {
+		case 32:
+			x->val[0] = ((fp[0]._mpfr_d[1] >> 24) &       0x7F) |   /* frac3 */
+			             (neg              << 15)               |
+			             (expfield         <<  7)               |
+			            ((fp[0]._mpfr_d[1] <<  8) & 0xFFFF0000);    /* frac2 */
+			x->val[1] = ((fp[0]._mpfr_d[1] <<  8) & 0x0000FF00) |   /* frac1 (hi) */
+			            ((fp[0]._mpfr_d[0] >> 24) & 0x000000FF) |   /* frac1 (lo) */
+			            ((fp[0]._mpfr_d[0] <<  8) & 0xFFFF0000);    /* frac0 */
+			break;
+		case 64:
+			x->val[0] = ((fp[0]._mpfr_d[0] >> 56) &       0x7F) |   /* frac3 */
+			             (neg              << 15)               |
+			             (expfield         <<  7)               |
+			            ((fp[0]._mpfr_d[0] >> 24) & 0xFFFF0000);    /* frac2 */
+			x->val[1] = ((fp[0]._mpfr_d[0] >> 24) &     0xFFFF) |   /* frac1 */
+			            ((fp[0]._mpfr_d[0] <<  8) & 0xFFFF0000);    /* frac0 */
+			break;
+		default:
+			UNREACHABLE();
+		}
 		x->val[2] = 0;
 		x->val[3] = 0;
 		break;
@@ -295,12 +322,27 @@ static bool fp_from_str(struct big_int *x, const char *s, char type)
 			return false;
 		}
 
-		x->val[0] = ((fp[0]._mpfr_d[0] >> 59) &        0xF) |   /* frac3 */
-		             (neg              << 15)               |
-		             (expfield         <<  4)               |
-		            ((fp[0]._mpfr_d[0] >> 27) & 0xFFFF0000);    /* frac2 */
-		x->val[1] = ((fp[0]._mpfr_d[0] >> 27) &     0xFFFF) |   /* frac1 */
-		            ((fp[0]._mpfr_d[0] <<  5) & 0xFFFF0000);    /* frac0 */
+		switch (mp_bits_per_limb) {
+		case 32:
+			x->val[0] = ((fp[0]._mpfr_d[1] >> 27) &        0xF) |   /* frac3 */
+			             (neg              << 15)               |
+			             (expfield         <<  4)               |
+			            ((fp[0]._mpfr_d[1] <<  5) & 0xFFFF0000);    /* frac2 */
+			x->val[0] = ((fp[0]._mpfr_d[1] <<  5) &     0xFFE0) |   /* frac1 (hi) */
+			            ((fp[0]._mpfr_d[0] >> 27) &       0x1F) |   /* frac1 (lo) */
+			            ((fp[0]._mpfr_d[0] <<  5) & 0xFFFF0000);    /* frac 0 */
+			break;
+		case 64:
+			x->val[0] = ((fp[0]._mpfr_d[0] >> 59) &        0xF) |   /* frac3 */
+			             (neg              << 15)               |
+			             (expfield         <<  4)               |
+			            ((fp[0]._mpfr_d[0] >> 27) & 0xFFFF0000);    /* frac2 */
+			x->val[1] = ((fp[0]._mpfr_d[0] >> 27) &     0xFFFF) |   /* frac1 */
+			            ((fp[0]._mpfr_d[0] <<  5) & 0xFFFF0000);    /* frac0 */
+			break;
+		default:
+			UNREACHABLE();
+		}
 		x->val[2] = 0;
 		x->val[3] = 0;
 		break;
@@ -336,16 +378,36 @@ static bool fp_from_str(struct big_int *x, const char *s, char type)
 			return false;
 		}
 
-		x->val[0] = ((fp[0]._mpfr_d[1] >> 31) & 0xFFFF0000) |	/* frac6 */
-		             (neg              << 15)               |
-		              expfield;
-		x->val[1] = ((fp[0]._mpfr_d[1] >> 31) &     0xFFFF) |   /* frac5 */
-		            ((fp[0]._mpfr_d[1] <<  1) & 0xFFFF0000);    /* frac4 */
-		x->val[2] = ((fp[0]._mpfr_d[1] <<  1) &     0xFFFF) |   /* frac3 */
-		             (fp[0]._mpfr_d[0] >> 63)               |   /* frac3 */
-		            ((fp[0]._mpfr_d[0] >> 31) & 0xFFFF0000);    /* frac2 */
-		x->val[3] = ((fp[0]._mpfr_d[0] >> 31) &     0xFFFF) |   /* frac1 */
-		            ((fp[0]._mpfr_d[0] <<  1) & 0xFFFF0000);    /* frac0 */
+		switch (mp_bits_per_limb) {
+		case 32:
+			x->val[0] = ((fp[0]._mpfr_d[3] <<  1) & 0xFFFF0000) |   /* frac6 */
+			             (neg              << 15)               |
+			             expfield;
+			x->val[1] = ((fp[0]._mpfr_d[3] <<  1) &     0xFFFE) |   /* frac5 (hi) */
+			            ((fp[0]._mpfr_d[2] >> 31) &        0x1) |   /* frac5 (lo) */
+			            ((fp[0]._mpfr_d[2] <<  1) & 0xFFFF0000);    /* frac4 */
+			x->val[2] = ((fp[0]._mpfr_d[2] <<  1) &     0xFFFE) |   /* frac3 (hi) */
+			            ((fp[0]._mpfr_d[1] >> 31) &        0x1) |   /* frac3 (lo) */
+			            ((fp[0]._mpfr_d[1] <<  1) & 0xFFFF0000);    /* frac2 */
+			x->val[3] = ((fp[0]._mpfr_d[1] <<  1) &     0xFFFE) |   /* frac1 (hi) */
+			            ((fp[0]._mpfr_d[0] >> 31) &        0x1) |   /* frac1 (lo) */
+			            ((fp[0]._mpfr_d[0] <<  1) & 0xFFFF0000);    /* frac0 */
+			break;
+		case 64:
+			x->val[0] = ((fp[0]._mpfr_d[1] >> 31) & 0xFFFF0000) |	/* frac6 */
+			             (neg              << 15)               |
+			              expfield;
+			x->val[1] = ((fp[0]._mpfr_d[1] >> 31) &     0xFFFF) |   /* frac5 */
+			            ((fp[0]._mpfr_d[1] <<  1) & 0xFFFF0000);    /* frac4 */
+			x->val[2] = ((fp[0]._mpfr_d[1] <<  1) &     0xFFFE) |   /* frac3 */
+			            ((fp[0]._mpfr_d[0] >> 63) &        0x1) |   /* frac3 */
+			            ((fp[0]._mpfr_d[0] >> 31) & 0xFFFF0000);    /* frac2 */
+			x->val[3] = ((fp[0]._mpfr_d[0] >> 31) &     0xFFFF) |   /* frac1 */
+			            ((fp[0]._mpfr_d[0] <<  1) & 0xFFFF0000);    /* frac0 */
+			break;
+		default:
+			UNREACHABLE();
+		}
 		break;
 	default:
 		UNREACHABLE();
@@ -397,8 +459,15 @@ static struct str_ret fp_to_str(const char *fmt, struct big_int x, char type)
 
 		mpfr_set_d(fp, 1.0, MPFR_RNDN);
 		mpfr_set_exp(fp, expfield - 128);
-		if (mp_bits_per_limb == 64) {
+		switch (mp_bits_per_limb) {
+		case 32:
+			fp[0]._mpfr_d[0] = ((uint32_t) fract >>  1) | ((uint32_t) 1 << 31);
+			break;
+		case 64:
 			fp[0]._mpfr_d[0] = ((uint64_t) fract << 31) | ((uint64_t) 1 << 63);
+			break;
+		default:
+			UNREACHABLE();
 		}
 		break;
 		}
@@ -430,8 +499,16 @@ static struct str_ret fp_to_str(const char *fmt, struct big_int x, char type)
 
 		mpfr_set_d(fp, 1.0, MPFR_RNDN);
 		mpfr_set_exp(fp, expfield - 128);
-		if (mp_bits_per_limb == 64) {
+		switch (mp_bits_per_limb) {
+		case 32:
+			fp[0]._mpfr_d[1] = (fract >> 33) | ((uint32_t) 1 << 31);
+			fp[0]._mpfr_d[0] = (fract >>  1) & 0xFFFFFF00;
+			break;
+		case 64:
 			fp[0]._mpfr_d[0] = (fract >> 1) | ((uint64_t) 1 << 63);
+			break;
+		default:
+			UNREACHABLE();
 		}
 		break;
 		}
@@ -463,8 +540,16 @@ static struct str_ret fp_to_str(const char *fmt, struct big_int x, char type)
 
 		mpfr_set_d(fp, 1.0, MPFR_RNDN);
 		mpfr_set_exp(fp, expfield - 1024);
-		if (mp_bits_per_limb == 64) {
+		switch (mp_bits_per_limb) {
+		case 32:
+			fp[0]._mpfr_d[1] = (fract >> 33) | ((uint32_t) 1 << 31);
+			fp[0]._mpfr_d[0] = (fract >>  1) & 0xFFFFF800;
+			break;
+		case 64:
 			fp[0]._mpfr_d[0] = (fract >> 1) | ((uint64_t) 1 << 63);
+			break;
+		default:
+			UNREACHABLE();
 		}
 		break;
 		}
@@ -499,9 +584,20 @@ static struct str_ret fp_to_str(const char *fmt, struct big_int x, char type)
 
 		mpfr_set_d(fp, 1.0, MPFR_RNDN);
 		mpfr_set_exp(fp, expfield - 16384);
-		if (mp_bits_per_limb == 64) {
+		switch (mp_bits_per_limb) {
+		case 32:
+			fp[0]._mpfr_d[3] = (fract[0] >> 33) | ((uint32_t) 1 << 31);
+			fp[0]._mpfr_d[2] = (fract[0] >>  1) & 0xFFFFFFFF;
+			fp[0]._mpfr_d[1] = ((fract[0] << 31) & 0x80000000) |
+			                   (fract[1] >> 33);
+			fp[0]._mpfr_d[0] = (fract[1] >>  1) & 0xFFFF8000;
+			break;
+		case 64:
 			fp[0]._mpfr_d[1] = (fract[0] >> 1) | ((uint64_t) 1 << 63);
 			fp[0]._mpfr_d[0] = (fract[1] >> 1) | (fract[0] << 63);
+			break;
+		default:
+			UNREACHABLE();
 		}
 		break;
 		}
