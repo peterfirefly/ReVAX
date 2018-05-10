@@ -602,49 +602,48 @@ void experiment_fp()
 	struct big_int	fp = {{0}};
 
 	fp.val[0] = 0x209B3F9A; /* 'f' for Log10(2) = 0.301029996 */
-	printf(" log_10(2) = %e %f %.10g\n", log10f(2.0), log10f(2.0), log10f(2.0));
-	printf(" log_10(2) = %s\n", fp_to_str("%g", fp, 'f').str);
+	printf("  log_10(2) = %e %f %.10g\n", log10f(2.0), log10f(2.0), log10f(2.0));
+	printf("f log_10(2) = %s\n", fp_to_str("%g", fp, 'f').str);
+	printf("\n");
 
-	printf("\n\n");
 	fp.val[0] = 0x21CA4029; /* 'g' for 3.1415 */
 	fp.val[1] = 0x126FC083;
-	printf(" x = %s\n", fp_to_str("%g", fp, 'g').str);
+	printf("g: π = %s\n", fp_to_str("%g", fp, 'g').str);
+	printf("\n");
 
-	printf("\n\n");
 	fp.val[0] = 0x0E564149; /* 'd' for 3.1415 */
 	fp.val[1] = 0x93750418;
-	printf(" x = %s\n", fp_to_str("%g", fp, 'd').str);
+	printf("d: π = %s\n", fp_to_str("%g", fp, 'd').str);
+	printf("\n");
 
-	printf("\n\n");
 	fp.val[0] = 0x5BF04002; /* 'h' for 2.71828 */
 	fp.val[1] = 0xAF78995A;
 	fp.val[2] = 0x5EC8FEEF;
 	fp.val[3] = 0xABC90C73;
-	printf(" x = %s\n", fp_to_str("%g", fp, 'h').str);
+	printf("h: e = %s\n", fp_to_str("%g", fp, 'h').str);
 
 	printf("\n\n");
 
 	printf("3.1415:\n");
 	fp_from_str(&fp, "3.1415", 'f');
-	printf("fp: %04X_%04X\n", SPLIT(fp.val[0]));
+	printf("f: %04X_%04X\n", SPLIT(fp.val[0]));
+	printf("f: %s\n", fp_to_str("%g", fp, 'f').str);
 	printf("\n");
-	printf("fp: %s\n", fp_to_str("%g", fp, 'f').str);
 
 	fp_from_str(&fp, "3.1415", 'd');
-	printf("fp: %04X_%04X %04X_%04X\n", SPLIT(fp.val[0]), SPLIT(fp.val[1]));
+	printf("d: %04X_%04X %04X_%04X\n", SPLIT(fp.val[0]), SPLIT(fp.val[1]));
+	printf("d: %s\n", fp_to_str("%g", fp, 'd').str);
 	printf("\n");
-	printf("fp: %s\n", fp_to_str("%g", fp, 'd').str);
 
 	fp_from_str(&fp, "3.1415", 'g');
-	printf("fp: %04X_%04X %04X_%04X\n", SPLIT(fp.val[0]), SPLIT(fp.val[1]));
+	printf("g: %04X_%04X %04X_%04X\n", SPLIT(fp.val[0]), SPLIT(fp.val[1]));
+	printf("g: %s\n", fp_to_str("%g", fp, 'g').str);
 	printf("\n");
-	printf("fp: %s\n", fp_to_str("%g", fp, 'g').str);
 
 	fp_from_str(&fp, "3.1415", 'h');
-	printf("fp: %04X_%04X %04X_%04X %04X_%04X %04X_%04X\n",
+	printf("h: %04X_%04X %04X_%04X %04X_%04X %04X_%04X\n",
 	       SPLIT(fp.val[0]), SPLIT(fp.val[1]), SPLIT(fp.val[2]), SPLIT(fp.val[3]));
-	printf("\n");
-	printf("fp: %s\n", fp_to_str("%g", fp, 'h').str);
+	printf("h: %s\n", fp_to_str("%g", fp, 'h').str);
 }
 
 
