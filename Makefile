@@ -28,7 +28,8 @@ AFL_OUT=~/tmp/
 
 VERSION=v0.1
 GITHASH=$(shell cat .git/refs/heads/master)
-PLATFORM=$(shell . /etc/lsb-release; echo $$DISTRIB_DESCRIPTION)
+#PLATFORM=$(shell . /etc/lsb-release; echo $$DISTRIB_DESCRIPTION)
+PLATFORM=$(shell . /etc/os-release; echo $$PRETTY_NAME)
 NOW=$(shell date --utc '+%Y-%m-%d %H:%M:%S') UTC
 REVAXURL=https://github.com/peterfirefly/ReVAX
 CCVER=$(shell $(CC) --version | head -n1)
