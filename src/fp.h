@@ -221,7 +221,11 @@ static bool fp_from_str(struct big_int *x, const char *s, char type)
 			            ((fp[0]._mpfr_d[0] <<  8) & 0xFFFF0000);    /* frac0 */
 			break;
 		case 64:
-			x->val[0] = ((fp[0]._mpfr_d[0] >> 56) &       0x7F) |   /* frac1 */
+			assert(sizeof(fp[0]._mpfr_d[0]) == 8);
+
+			/* work around warning when compiling on a 32-bit platform */
+			int	shift_56 = 56;
+			x->val[0] = ((fp[0]._mpfr_d[0] >> shift_56) &       0x7F) |   /* frac1 */
 			             (neg              << 15)               |
 			             (expfield         <<  7)               |
 			            ((fp[0]._mpfr_d[0] >> 24) & 0xFFFF0000);    /* frac0 */
@@ -277,7 +281,11 @@ static bool fp_from_str(struct big_int *x, const char *s, char type)
 			            ((fp[0]._mpfr_d[0] <<  8) & 0xFFFF0000);    /* frac0 */
 			break;
 		case 64:
-			x->val[0] = ((fp[0]._mpfr_d[0] >> 56) &       0x7F) |   /* frac3 */
+			assert(sizeof(fp[0]._mpfr_d[0]) == 8);
+
+			/* work around warning when compiling on a 32-bit platform */
+			int	shift_56 = 56;
+			x->val[0] = ((fp[0]._mpfr_d[0] >> shift_56) &       0x7F) |   /* frac3 */
 			             (neg              << 15)               |
 			             (expfield         <<  7)               |
 			            ((fp[0]._mpfr_d[0] >> 24) & 0xFFFF0000);    /* frac2 */
@@ -333,7 +341,11 @@ static bool fp_from_str(struct big_int *x, const char *s, char type)
 			            ((fp[0]._mpfr_d[0] <<  5) & 0xFFFF0000);    /* frac 0 */
 			break;
 		case 64:
-			x->val[0] = ((fp[0]._mpfr_d[0] >> 59) &        0xF) |   /* frac3 */
+			assert(sizeof(fp[0]._mpfr_d[0]) == 8);
+
+			/* work around warning when compiling on a 32-bit platform */
+			int	shift_59 = 59;
+			x->val[0] = ((fp[0]._mpfr_d[0] >> shift_59) &        0xF) |   /* frac3 */
 			             (neg              << 15)               |
 			             (expfield         <<  4)               |
 			            ((fp[0]._mpfr_d[0] >> 27) & 0xFFFF0000);    /* frac2 */
@@ -394,13 +406,17 @@ static bool fp_from_str(struct big_int *x, const char *s, char type)
 			            ((fp[0]._mpfr_d[0] <<  1) & 0xFFFF0000);    /* frac0 */
 			break;
 		case 64:
+			assert(sizeof(fp[0]._mpfr_d[0]) == 8);
+
+			/* work around warning when compiling on a 32-bit platform */
+			int	shift_63 = 63;
 			x->val[0] = ((fp[0]._mpfr_d[1] >> 31) & 0xFFFF0000) |	/* frac6 */
 			             (neg              << 15)               |
 			              expfield;
 			x->val[1] = ((fp[0]._mpfr_d[1] >> 31) &     0xFFFF) |   /* frac5 */
 			            ((fp[0]._mpfr_d[1] <<  1) & 0xFFFF0000);    /* frac4 */
 			x->val[2] = ((fp[0]._mpfr_d[1] <<  1) &     0xFFFE) |   /* frac3 */
-			            ((fp[0]._mpfr_d[0] >> 63) &        0x1) |   /* frac3 */
+			            ((fp[0]._mpfr_d[0] >> shift_63) &        0x1) |   /* frac3 */
 			            ((fp[0]._mpfr_d[0] >> 31) & 0xFFFF0000);    /* frac2 */
 			x->val[3] = ((fp[0]._mpfr_d[0] >> 31) &     0xFFFF) |   /* frac1 */
 			            ((fp[0]._mpfr_d[0] <<  1) & 0xFFFF0000);    /* frac0 */
