@@ -1367,6 +1367,12 @@ void help()
 	fprintf(stderr, " mode:\n");
 	fprintf(stderr, "   --experiment  experiments with fp values\n");
 	fprintf(stderr, "   --built-in    built-in test of fp<-->string conversions\n");
+	fprintf(stderr, "\n");
+	fprintf(stderr, "MPFR version (according to header):  %s\n", MPFR_VERSION_STRING);
+	fprintf(stderr, "MPFR version (according to library): %s\n", mpfr_get_version());
+	if (strcmp(mpfr_get_version(), MPFR_VERSION_STRING) != 0)
+		fprintf(stderr, "ERROR: header and library don't match!\n");
+	fprintf(stderr, "mp_bits_per_limb: %d\n", mp_bits_per_limb);
 	exit(EXIT_FAILURE);
 }
 
