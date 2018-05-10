@@ -395,6 +395,7 @@ static struct str_ret fp_to_str(const char *fmt, struct big_int x, char type)
 			}
 		}
 
+		mpfr_set_d(fp, 1.0, MPFR_RNDN);
 		mpfr_set_exp(fp, expfield - 128);
 		if (mp_bits_per_limb == 64) {
 			fp[0]._mpfr_d[0] = ((uint64_t) fract << 31) | ((uint64_t) 1 << 63);
@@ -427,6 +428,7 @@ static struct str_ret fp_to_str(const char *fmt, struct big_int x, char type)
 			}
 		}
 
+		mpfr_set_d(fp, 1.0, MPFR_RNDN);
 		mpfr_set_exp(fp, expfield - 128);
 		if (mp_bits_per_limb == 64) {
 			fp[0]._mpfr_d[0] = (fract >> 1) | ((uint64_t) 1 << 63);
@@ -459,6 +461,7 @@ static struct str_ret fp_to_str(const char *fmt, struct big_int x, char type)
 			}
 		}
 
+		mpfr_set_d(fp, 1.0, MPFR_RNDN);
 		mpfr_set_exp(fp, expfield - 1024);
 		if (mp_bits_per_limb == 64) {
 			fp[0]._mpfr_d[0] = (fract >> 1) | ((uint64_t) 1 << 63);
@@ -494,6 +497,7 @@ static struct str_ret fp_to_str(const char *fmt, struct big_int x, char type)
 			}
 		}
 
+		mpfr_set_d(fp, 1.0, MPFR_RNDN);
 		mpfr_set_exp(fp, expfield - 16384);
 		if (mp_bits_per_limb == 64) {
 			fp[0]._mpfr_d[1] = (fract[0] >> 1) | ((uint64_t) 1 << 63);
