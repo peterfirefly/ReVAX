@@ -40,3 +40,13 @@
 #include "op-val.h"
 
 
+int main()
+{
+	uint8_t		disp8;
+	uint16_t	disp16;
+
+	(void) parse_branch8(&disp8, 0);
+	(void) parse_branch16(&disp16, 0);
+	return EXIT_SUCCESS;
+}
+
