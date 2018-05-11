@@ -83,7 +83,7 @@ help:
 	@echo ''
 	@echo '  cov          create HTML report of coverage after a run'
 	@echo ''
-	@echo '  snips        small VAX test programs (runtime/test*.bin)'
+	@echo '  snips        small VAX test programs (vax-test/test*.bin)'
 	@echo '  tables       generated files with tables that describe VAX instructions'
 	@echo '  ops          generated files that handle operands for asm/dis/sim'
 	@echo '  stats        how much code is there?'
@@ -588,7 +588,7 @@ src/vax-fraglists.h:	src/fragtable
 #   binutils 2.28
 
 # small snippets of raw code for testing simulator and disassembler
-snips:	check-vax-tools runtime/test1.bin runtime/test2.bin runtime/test3.bin
+snips:	check-vax-tools vax-test/test1.bin vax-test/test2.bin vax-test/test3.bin
 
 
 
@@ -601,7 +601,7 @@ check-vax-tools:
 
 
 # the tests are based on small C programs
-runtime/%.bin: runtime/%.c
+vax-test/%.bin: vax-test/%.c
 	vax-linux-gcc -std=c99 -c -O0 -W -Wall $< -o $(basename $<).o
 	vax-linux-objcopy --output-target binary $(basename $<).o $@
 #	vax-linux-objdump -b binary -m vax -D $@
@@ -704,7 +704,7 @@ stats:	tables ops
 	@echo ''
 	@echo 'VAX test snippets'
 	@echo '-----------------'
-	@wc runtime/test*.c						\
+	@wc vax-test/test*.c						\
 	  | misc/totals.pl
 	@echo ''
 	@echo ''
