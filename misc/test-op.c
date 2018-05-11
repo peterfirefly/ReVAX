@@ -738,6 +738,285 @@ void test_parse()
 /***/
 
 
+/* test parse_branch8/parse_branch16 ('bb'/'bw') */
+void parse_branch_displacements()
+{
+	int	testcnt=0;
+	int	passcnt=0;
+
+	/* first test with displacements from 0x0000_0000 (tests wrap-arounds) */
+	struct {
+		const char	*str;
+		bool		 ok;
+		uint8_t		 disp;
+	} test_8a [] = {
+	{.str="",       .ok=false},
+	{.str="   \t\t",.ok=false},
+	{.str=" 7",     .ok=true, .disp=7},
+	{.str="\t\t  \t7", .ok=true, .disp=7},
+	{.str="0",      .ok=true, .disp=0},
+	{.str="1",      .ok=true, .disp=1},
+	{.str="2",      .ok=true, .disp=2},
+	{.str="0x7F",   .ok=true, .disp=0x7F},
+	{.str="^X7F",   .ok=true, .disp=0x7F},
+	{.str="0x7f",   .ok=true, .disp=0x7F},
+	{.str="^X7f",   .ok=true, .disp=0x7F},
+	{.str="0x80",   .ok=false},
+	{.str="0xFF",   .ok=false},
+	{.str="0x100",  .ok=false},
+	{.str="0xFFFF_FFFF", .ok=true, .disp=0xFF},
+	{.str="0xFFFF_FFFE", .ok=true, .disp=0xFE},
+	{.str="0xFFFF_FF80", .ok=true, .disp=0x80},
+	{.str="0xFFFF_FF7F", .ok=false}
+	};
+
+	for (unsigned i=0; i < ARRAY_SIZE(test_8a); i++) {
+		uint8_t		disp;
+		bool		ok;
+
+		testcnt++;
+
+		parse_init(test_8a[i].str);
+		ok = parse_branch8(&disp, 0x00000000);
+		if (ok != test_8a[i].ok) {
+			printf("test_8a %3d: |%s| %s (should be %s)\n",
+				i,
+				test_8a[i].str,
+				test_8a[i].ok ? "true" : "false",
+				ok ? "true" : "false");
+			goto DONE_8a;
+		}
+
+		if (!ok) {
+			passcnt++;
+			goto DONE_8a;
+		}
+
+		if (disp != test_8a[i].disp) {
+			printf("test_8a %3d: |%s| disp=%02X (should be %02X)\n",
+				i,
+				test_8a[i].str,
+				disp, test_8a[i].disp);
+			goto DONE_8a;
+		}
+		if (!parse_eof()) {
+			printf("test_8a %3d: |%s| not eof\n",
+				i,
+				test_8a[i].str);
+			goto DONE_8a;
+		}
+
+		passcnt++;
+DONE_8a:
+		parse_done();
+	}
+
+	/* then test with displacements from 0x0000_1003 */
+	struct {
+		const char	*str;
+		bool		 ok;
+		uint8_t		 disp;
+	} test_8b [] = {
+	{.str="0x0000_1003", .ok=true, .disp=0},
+	{.str="0x0000_1004", .ok=true, .disp=1},
+	{.str="0x0000_1005", .ok=true, .disp=2},
+	{.str="0x0000_1082", .ok=true, .disp=0x7F},
+	{.str="^X0000_1082", .ok=true, .disp=0x7F},
+	{.str="0x0000_1082", .ok=true, .disp=0x7F},
+	{.str="^X0000_1082", .ok=true, .disp=0x7F},
+	{.str="0x0000_1083", .ok=false},
+	{.str="0x0000_1102", .ok=false},
+	{.str="0x0000_1103", .ok=false},
+	{.str="0x0000_1002", .ok=true, .disp=0xFF},
+	{.str="0x0000_1001", .ok=true, .disp=0xFE},
+	{.str="0x0000_0F83", .ok=true, .disp=0x80},
+	{.str="0x0000_0F82", .ok=false}
+	};
+
+	for (unsigned i=0; i < ARRAY_SIZE(test_8b); i++) {
+		uint8_t		disp;
+		bool		ok;
+
+		testcnt++;
+
+		parse_init(test_8b[i].str);
+		ok = parse_branch8(&disp, 0x00001003);
+		if (ok != test_8b[i].ok) {
+			printf("test_8b %3d: |%s| %s (should be %s)\n",
+				i,
+				test_8b[i].str,
+				test_8b[i].ok ? "true" : "false",
+				ok ? "true" : "false");
+			goto DONE_8b;
+		}
+
+		if (!ok) {
+			passcnt++;
+			goto DONE_8b;
+		}
+
+		if (disp != test_8b[i].disp) {
+			printf("test_8b %3d: |%s| disp=%02X (should be %02X)\n",
+				i,
+				test_8b[i].str,
+				disp, test_8b[i].disp);
+			goto DONE_8b;
+		}
+		if (!parse_eof()) {
+			printf("test_8b %3d: |%s| not eof\n",
+				i,
+				test_8b[i].str);
+			goto DONE_8b;
+		}
+
+		passcnt++;
+DONE_8b:
+		parse_done();
+	}
+
+	/* first test with displacements from 0x0000_0000 (tests wrap-arounds) */
+	struct {
+		const char	*str;
+		bool		 ok;
+		uint16_t		 disp;
+	} test_16a [] = {
+	{.str="",       .ok=false},
+	{.str="   \t\t",.ok=false},
+	{.str=" 7",     .ok=true, .disp=7},
+	{.str="\t\t  \t7", .ok=true, .disp=7},
+	{.str="0",      .ok=true, .disp=0},
+	{.str="1",      .ok=true, .disp=1},
+	{.str="2",      .ok=true, .disp=2},
+	{.str="0x7F",   .ok=true, .disp=0x7F},
+	{.str="^X7F",   .ok=true, .disp=0x7F},
+	{.str="0x7f",   .ok=true, .disp=0x7F},
+	{.str="^X7f",   .ok=true, .disp=0x7F},
+	{.str="0x80",   .ok=true, .disp=0x80},
+	{.str="0xFF",   .ok=true, .disp=0xFF},
+	{.str="0x100",  .ok=true, .disp=0x100},
+	{.str="0x7FFF", .ok=true, .disp=0x7FFF},
+	{.str="0x8000", .ok=false},
+	{.str="0x10000", .ok=false},
+	{.str="0x10100", .ok=false},
+	{.str="0xFFFF_FFFF", .ok=true, .disp=0xFFFF},
+	{.str="0xFFFF_FFFE", .ok=true, .disp=0xFFFE},
+	{.str="0xFFFF_FF80", .ok=true, .disp=0xFF80},
+	{.str="0xFFFF_FF7F", .ok=true, .disp=0xFF7F},
+	{.str="0xFFFF_8000", .ok=true, .disp=0x8000},
+	{.str="0xFFFF_7FFF", .ok=false},
+	};
+
+	for (unsigned i=0; i < ARRAY_SIZE(test_16a); i++) {
+		uint16_t	disp;
+		bool		ok;
+
+		testcnt++;
+
+		parse_init(test_16a[i].str);
+		ok = parse_branch16(&disp, 0x00000000);
+		if (ok != test_16a[i].ok) {
+			printf("test_16a %3d: |%s| %s (should be %s)\n",
+				i,
+				test_16a[i].str,
+				test_16a[i].ok ? "true" : "false",
+				ok ? "true" : "false");
+			goto DONE_16a;
+		}
+
+		if (!ok) {
+			passcnt++;
+			goto DONE_16a;
+		}
+
+		if (disp != test_16a[i].disp) {
+			printf("test_16a %3d: |%s| disp=%02X (should be %02X)\n",
+				i,
+				test_16a[i].str,
+				disp, test_16a[i].disp);
+			goto DONE_16a;
+		}
+		if (!parse_eof()) {
+			printf("test_16a %3d: |%s| not eof\n",
+				i,
+				test_16a[i].str);
+			goto DONE_16a;
+		}
+
+		passcnt++;
+DONE_16a:
+		parse_done();
+	}
+
+	/* then test with displacements from 0x0000_1003 */
+	struct {
+		const char	*str;
+		bool		 ok;
+		uint16_t	 disp;
+	} test_16b [] = {
+	{.str="0x0000_1003", .ok=true, .disp=0},
+	{.str="0x0000_1004", .ok=true, .disp=1},
+	{.str="0x0000_1005", .ok=true, .disp=2},
+	{.str="0x0000_1082", .ok=true, .disp=0x7F},
+	{.str="^X0000_1082", .ok=true, .disp=0x7F},
+	{.str="0x0000_1082", .ok=true, .disp=0x7F},
+	{.str="^X0000_1082", .ok=true, .disp=0x7F},
+	{.str="0x0000_1083", .ok=true, .disp=0x80},
+	{.str="0x0000_1123", .ok=true, .disp=0x120},
+	{.str="0x0000_9002", .ok=true, .disp=0x7FFF},
+	{.str="0x0000_9003", .ok=false},
+	{.str="0x0001_1003", .ok=false},
+	{.str="0x0000_1002", .ok=true, .disp=0xFFFF},
+	{.str="0x0000_1001", .ok=true, .disp=0xFFFE},
+	{.str="0x0000_0F83", .ok=true, .disp=0xFF80},
+	{.str="0xFFFF_9003", .ok=true, .disp=0x8000},
+	{.str="0xFFFF_9002", .ok=false}
+	};
+
+	for (unsigned i=0; i < ARRAY_SIZE(test_16b); i++) {
+		uint16_t		disp;
+		bool			ok;
+
+		testcnt++;
+
+		parse_init(test_16b[i].str);
+		ok = parse_branch16(&disp, 0x00001003);
+		if (ok != test_16b[i].ok) {
+			printf("test_16b %3d: |%s| %s (should be %s)\n",
+				i,
+				test_16b[i].str,
+				test_16b[i].ok ? "true" : "false",
+				ok ? "true" : "false");
+			goto DONE_16b;
+		}
+
+		if (!ok) {
+			passcnt++;
+			goto DONE_16b;
+		}
+
+		if (disp != test_16b[i].disp) {
+			printf("test_16b %3d: |%s| disp=%02X (should be %02X)\n",
+				i,
+				test_16b[i].str,
+				disp, test_16b[i].disp);
+			goto DONE_16b;
+		}
+		if (!parse_eof()) {
+			printf("test_16b %3d: |%s| not eof\n",
+				i,
+				test_16b[i].str);
+			goto DONE_16b;
+		}
+
+		passcnt++;
+DONE_16b:
+		parse_done();
+	}
+
+	printf("%d/%d tests passed (parse_branch8/parse_branch16)\n", passcnt, testcnt);
+}
+
+
 
 struct test_asm_case {
 	const char	*str;
@@ -1299,6 +1578,11 @@ void test_asm()
 
 	printf("Assembler tests\n");
 	printf("---------------\n");
+
+	/* branch8/branch16 (not part of the op_asm() stuff) */
+	parse_branch_displacements();
+
+	/* op_asm() tests */
 	for (unsigned tst=0; tst < ARRAY_SIZE(asm_vax); tst++) {
 		uint8_t	b[MAX_OPLEN] = {};
 		int	bytes;
