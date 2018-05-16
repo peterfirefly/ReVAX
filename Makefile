@@ -70,11 +70,12 @@ DEP=$(subst \, ,$(shell $(CPP) -Isrc -MM $(2) -MG -MT $(1)))
 ###
 
 help:
-	@echo 'make all | asm|dis|sim | cov |snips|tables|stats | clean|distclean'
+	@echo 'make all | asm|dis|sim|uop | cov | snips|tables|stats | clean|distclean'
 	@echo ''
 	@echo '  asm          assembler (revax-asm)'
 	@echo '  dis          disassembler (revax-dis)'
 	@echo '  sim          simulator (revax-sim)'
+	@echo '  uop          instruction to µops decoder (revax-uop)'
 	@echo ''
 	@echo '  *.cov        compile for coverage analysis'
 	@echo '  *.dbg        compile with debug symbols'
