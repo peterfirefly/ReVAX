@@ -414,7 +414,6 @@ run-fp:		test-fp
 run-op:		test-op
 	./test-op --built-in       >  misc/test-op.output
 	./test-op --built-in-parse >> misc/test-op.output
-	echo xx >> misc/test-op.output
 	diff -pu misc/test-op.expected misc/test-op.output
 
 run-alu:	test-alu
