@@ -397,24 +397,35 @@ $(call DEP,test-dis-uop-nosan,misc/test-dis-uop.c)
 
 
 .PHONY:	run-tests
-run-tests:	run-big-int run-fp run-op run-alu run-analyze
+run-tests:	run-big-int run-fp run-op run-alu run-analyze run-dis-uop
 
 
 # --built-in
 run-big-int:	test-big-int
-	./test-big-int --built-in
+	./test-big-int --built-in > misc/test-big-int.output
+	diff -pu misc/test-big-int.expected misc/test-big-int.output
 
 run-fp:		test-fp
-	./test-fp --built-in
+	./test-fp --experiment > misc/test-fp.output
+# --built-in is very slow
+#	./test-fp --built-in
+	diff -pu misc/test-fp.expected misc/test-fp.output
 
 run-op:		test-op
-	./test-op --built-in
+	./test-op --built-in       >  misc/test-op.output
+	./test-op --built-in-parse >> misc/test-op.output
+	echo xx >> misc/test-op.output
+	diff -pu misc/test-op.expected misc/test-op.output
 
 run-alu:	test-alu
 	./test-alu --built-in
 
 run-analyze:	test-analyze
 	./test-analyze --built-in
+
+run-dis-uop:	test-dis-uop
+	./test-dis-uop > misc/test-dis-uop.output
+	diff -pu misc/test-dis-uop.expected misc/test-dis-uop.output
 
 
 
@@ -756,6 +767,7 @@ clean:	test-clean
 	   vax-test/*.raw vax-test/*.raw.asm			\
 	   *.lst *.raw						\
 	   *.gcno *.gcda *.info src/*.gcno src/*.gcda
+	-@rm -f misc/*.output
 	-@rm -rf cov/
 	-@rm -rf vax-bin/*.disasm  vax-bin/*.lst  vax-bin/*.html
 	-@rm -rf vax-test/*.disasm vax-test/*.lst vax-test/*.html

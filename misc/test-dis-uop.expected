@@ -1,0 +1,479 @@
+  0:   imm       0x0000_0000, r0   
+  1:   mov       r0, r1                   -- 32 µ
+  2:   mov       r0, r2                   -- 32 µ
+  3:   mov       r0, r3                   -- 32 µ
+  4:   mov       r0, r4                   -- 32 µ
+  5:   mov       r0, r5                   -- 32 µ
+  6:   mov       r0, r6                   -- 32 µ
+  7:   mov       r0, r7                   -- 32 µ
+  8:   mov       r0, r8                   -- 32 µ
+  9:   mov       r0, r9                   -- 32 µ
+ 10:   mov       r0, r10                  -- 32 µ
+ 11:   mov       r0, r11                  -- 32 µ
+ 12:   mov       r0, r12                  -- 32 µ
+ 13:   mov       r0, r13                  -- 32 µ
+ 14:   mov       r0, r14                  -- 32 µ
+ 15:   imm       0x0000_0000, t0   
+ 16:   mtpr      r0, t0   
+ 17:   imm       0x0000_0002, t0   
+ 18:   mtpr      r0, t0   
+ 19:   imm       0x0000_0001, t0   
+ 20:   mtpr      r0, t0   
+ 21:   imm       0x0000_0003, t0   
+ 22:   mtpr      r0, t0   
+ 23:   imm       0x0000_0004, t0   
+ 24:   mtpr      r0, t0   
+ 25:   imm       0x2004_0000, r15   
+ 26:   imm       0xCAFE_BABE, psl   
+ 27:   imm       0x0000_0038, t0   
+ 28:   mtpr      r0, t0   
+       ───
+ 29:   imm       0x0000_0001, t0   
+ 30:   bcc       always, 35               --    µ
+ 31:   imm       0x0000_0002, t0   
+ 32:   bcc       always, 35               --    µ
+ 33:   imm       0x0000_0007, t0   
+ 34:   bcc       always, 35               --    µ
+ 35:   bcc       always, 37               --    µ
+       ───
+ 36:   bcc       always, 37               --    µ
+       ───
+ 37:   imm       0x0000_0011, t1   
+ 38:   mfpr      t1, t1   
+ 39:   add       t0, t1, t0               -- 32 µ
+ 40:   ldu       [t0], t0                 -- 32 
+ 41:   imm       0x0000_0003, t1   
+ 42:   and       t0, t1, t1               -- 32 µ
+ 43:   bcc       =/z, 45                  --    µ
+ 44:   jmp       t0   
+       ───
+ 45:   nop          
+       ───
+ 46:   imm       <imm>, <pre>   
+       ───
+ 47:   imm       <imm>, <pre>   
+ 48:   imm       <imm>, <pre>   
+       ───
+ 49:   mov       <Rn>, <pre>              -- <width> µ
+       ───
+ 50:   mov       <Rn>, <pre>              -- 32 µ
+ 51:   mov       <Rn>, <pre>              -- 32 µ
+       ───
+ 52:   ld        [<pre>], <pre>           -- <width> 
+       ───
+ 53:   mov       <pre>, t0                -- 32 µ
+ 54:   ld        [t0], <pre>              -- 32 
+ 55:   ++        t0, t1                   -- 32 
+ 56:   ld        [t1], <pre>              -- 32 
+       ───
+ 57:   mov       <exe>, <reg>             -- <width> µ
+       ───
+ 58:   mov       <exe>, <reg>             -- 32 µ
+ 59:   mov       <exe>, <reg>             -- 32 µ
+       ───
+ 60:   mov       <pre>, t0                -- 32 µ
+ 61:   st        <exe>, [t0]              -- <width> 
+       ───
+ 62:   mov       <pre>, t0                -- 32 µ
+ 63:   st        <exe>, [t0]              -- 32 
+ 64:   ++        t0, t1                   -- 32 
+ 65:   st        <exe>, [t1]              -- 32 
+       ───
+ 66:   ldi       [<pre>], <pre>           -- <width> 
+       ───
+ 67:   mov       <pre>, t0                -- 32 µ
+ 68:   sti       <exe>, [t0]              -- <width> 
+       ───
+ 69:   nop          
+       ───
+ 70:   nop          
+       ───
+ 71:   nop          
+       ───
+ 72:   nop          
+       ───
+ 73:   []        <Rx>, t0                 -- <width> 
+ 74:   add       <Rn>, t0, <pre>          -- 32 µ
+       ───
+ 75:   []        <Rx>, t0                 -- <width> 
+ 76:   --        <Rn>, <Rn>               -- <width> 
+ 77:   add       <Rn>, t0, <pre>          -- 32 µ
+       ───
+ 78:   []        <Rx>, t0                 -- <width> 
+ 79:   add       <Rn>, t0, <pre>          -- 32 µ
+ 80:   ++        <Rn>, <Rn>               -- <width> 
+       ───
+ 81:   []        <Rx>, t0                 -- <width> 
+ 82:   ++        <Rn>, <Rn>               -- <width> 
+ 83:   ld        [<Rn>], t1               -- 32 
+ 84:   add       t0, t1, <pre>            -- 32 µ
+       ───
+ 85:   []        <Rx>, t0                 -- <width> 
+ 86:   imm       <imm>, t1   
+ 87:   add       t0, t1, <pre>            -- 32 µ
+       ───
+ 88:   []        <Rx>, t0                 -- <width> 
+ 89:   add       <Rn>, t0, t0             -- 32 µ
+ 90:   imm       <imm>, t1   
+ 91:   add       t0, t1, <pre>            -- 32 µ
+       ───
+ 92:   []        <Rx>, t0                 -- <width> 
+ 93:   imm       <imm>, t1   
+ 94:   add       <Rn>, t1, t1             -- 32 µ
+ 95:   ld        [t1], t1                 -- 32 
+ 96:   add       t0, t1, <pre>            -- 32 µ
+       ───
+ 97:   readpc    t0   
+ 98:   imm       <imm>, t1   
+ 99:   add       t0, t1, t0               -- 32 µ
+100:   []        <Rx>, t1                 -- <width> 
+101:   add       t0, t1, <pre>            -- 32 µ
+       ───
+102:   readpc    t0   
+103:   imm       <imm>, t1   
+104:   add       t0, t1, t0               -- 32 µ
+105:   ld        [t0], t0                 -- 32 
+106:   []        <Rx>, t1                 -- 32 
+107:   add       t0, t1, <pre>            -- 32 µ
+       ───
+108:   mov       <Rn>, <pre>              -- 32 µ
+       ───
+109:   --        <Rn>, <Rn>               -- <width> 
+110:   mov       <Rn>, <pre>              -- 32 µ
+       ───
+111:   mov       <Rn>, <pre>              -- 32 µ
+112:   ++        <Rn>, <Rn>               -- <width> 
+       ───
+113:   ld        [<Rn>], <pre>            -- 32 
+114:   ++        <Rn>, <Rn>               -- 32 
+       ───
+115:   imm       <imm>, <pre>   
+       ───
+116:   imm       <imm>, t0   
+117:   add       <Rn>, t0, <pre>          -- 32 µ
+       ───
+118:   imm       <imm>, t0   
+119:   add       <Rn>, t0, t0             -- 32 µ
+120:   ld        [t0], <pre>              -- 32 
+       ───
+121:   imm       <imm>, t0   
+122:   readpc    t1   
+123:   add       t0, t1, <pre>            -- 32 µ
+       ───
+124:   imm       <imm>, t0   
+125:   readpc    t1   
+126:   add       t0, t1, t0               -- 32 µ
+127:   ld        [t0], <pre>              -- 32 
+       ───
+128:   imm       <imm>, t0   
+129:   readpc    t1   
+130:   add       t0, t1, <pre>            -- 32 µ
+       ───
+131:   add       <pre>, <pre>, <exe>      --  8 arch
+       ───
+132:   add       <pre>, <pre>, <exe>      -- 16 arch
+       ───
+133:   add       <pre>, <pre>, <exe>      -- 32 arch
+       ───
+134:   sub       <pre>, <pre>, <exe>      --  8 arch
+       ───
+135:   sub       <pre>, <pre>, <exe>      -- 16 arch
+       ───
+136:   sub       <pre>, <pre>, <exe>      -- 32 arch
+       ───
+137:   mul       <pre>, <pre>, <exe>      --  8 arch
+       ───
+138:   mul       <pre>, <pre>, <exe>      -- 16 arch
+       ───
+139:   mul       <pre>, <pre>, <exe>      -- 32 arch
+       ───
+140:   div       <pre>, <pre>, <exe>      --  8 arch
+       ───
+141:   div       <pre>, <pre>, <exe>      -- 16 arch
+       ───
+142:   div       <pre>, <pre>, <exe>      -- 32 arch
+       ───
+143:   bic       <pre>, <pre>, <exe>      --  8 arch
+       ───
+144:   bic       <pre>, <pre>, <exe>      -- 16 arch
+       ───
+145:   bic       <pre>, <pre>, <exe>      -- 32 arch
+       ───
+146:   bis       <pre>, <pre>, <exe>      --  8 arch
+       ───
+147:   bis       <pre>, <pre>, <exe>      -- 16 arch
+       ───
+148:   bis       <pre>, <pre>, <exe>      -- 32 arch
+       ───
+149:   xor       <pre>, <pre>, <exe>      --  8 arch
+       ───
+150:   xor       <pre>, <pre>, <exe>      -- 16 arch
+       ───
+151:   xor       <pre>, <pre>, <exe>      -- 32 arch
+       ───
+152:   ashl      <pre>, <pre>, <exe>      --    arch
+       ───
+153:   ashq      <pre>, <pre>, <exe>      --    arch
+154:   rotl      <pre>, <pre>, <exe>      --    arch
+       ───
+155:   adc       <pre>, <pre>, <exe>      -- 32 arch
+       ───
+156:   sbb       <pre>, <pre>, <exe>      -- 32 arch
+       ───
+157:   imm       0x0000_0000, t0   
+158:   mov       t0, <exe>                --  8 arch
+       ───
+159:   imm       0x0000_0000, t0   
+160:   mov       t0, <exe>                -- 16 arch
+       ───
+161:   imm       0x0000_0000, t0   
+162:   mov       t0, <exe>                -- 32 arch
+       ───
+163:   imm       0x0000_0000, t0   
+164:   mov       t0, <exe>                -- 32 arch
+165:   mov       t0, <exe>                -- 32 arch
+       ───
+166:   imm       0x0000_0001, t0   
+167:   sub       <pre>, t0, <exe>         --  8 arch
+       ───
+168:   imm       0x0000_0001, t0   
+169:   sub       <pre>, t0, <exe>         -- 16 arch
+       ───
+170:   imm       0x0000_0001, t0   
+171:   sub       <pre>, t0, <exe>         -- 32 arch
+       ───
+172:   imm       0x0000_0001, t0   
+173:   add       <pre>, t0, <exe>         --  8 arch
+       ───
+174:   imm       0x0000_0001, t0   
+175:   add       <pre>, t0, <exe>         -- 16 arch
+       ───
+176:   imm       0x0000_0001, t0   
+177:   add       <pre>, t0, <exe>         -- 32 arch
+       ───
+178:   cmp       <pre>, <pre>             -- <width> arch
+       ───
+179:   imm       0x0000_0000, t0   
+180:   cmp       <pre>, t0                -- <width> arch
+       ───
+181:   signbl    <pre>, <exe>             --    arch
+       ───
+182:   signbw    <pre>, <exe>             --    arch
+       ───
+183:   signwl    <pre>, <exe>             --    arch
+       ───
+184:   trunclw   <pre>, <exe>             --    arch
+       ───
+185:   trunclb   <pre>, <exe>             --    arch
+       ───
+186:   truncwb   <pre>, <exe>             --    arch
+       ───
+187:   mov       <pre>, <exe>             -- <width> arch
+       ───
+188:   mov       <pre>, <exe>             -- 32 arch
+189:   movx      <pre>, <exe>             -- 32 arch
+       ───
+190:   imm       0xFFFF_FFFF, t1   
+191:   xor       <pre>, t1, <exe>         --  8 arch
+       ───
+192:   imm       0xFFFF_FFFF, t1   
+193:   xor       <pre>, t1, <exe>         -- 16 arch
+       ───
+194:   imm       0xFFFF_FFFF, t1   
+195:   xor       <pre>, t1, <exe>         -- 32 arch
+       ───
+196:   imm       0x0000_0000, t1   
+197:   sub       <pre>, t1, <exe>         -- <width> arch
+       ───
+198:   zerobw    <pre>, <exe>             --    arch
+       ───
+199:   zerobl    <pre>, <exe>             --    arch
+       ───
+200:   zerowl    <pre>, <exe>             --    arch
+       ───
+201:   mov       <pre>, <exe>             -- 32 arch
+       ───
+202:   --        r14, r14                 -- 32 
+203:   st        <pre>, [r14]             -- 32 
+       ───
+204:   --        r14, r14                 -- 32 
+205:   st        <pre>, [r14]             -- 32 
+       ───
+206:   bcc       <cc>, 207                --    arch
+       ───
+207:   jmp       <pre>   
+       ───
+208:   nop          
+       ───
+209:   nop          
+       ───
+210:   nop          
+       ───
+211:   nop          
+       ───
+212:   nop          
+       ───
+213:   nop          
+       ───
+214:   imm       0x0000_0004, t0   
+215:   sub       r14, t0, r14             -- 32 µ
+216:   st        r15, [r14]               -- 32 
+217:   jmp       <pre>   
+       ───
+218:   ld        [r14], t1                -- 32 
+219:   imm       0x0000_0004, t0   
+220:   add       r14, t0, r14             -- 32 µ
+221:   jmp       t1   
+       ───
+222:   nop          
+       ───
+223:   nop          
+       ───
+224:   nop          
+       ───
+225:   nop          
+       ───
+226:   nop          
+       ───
+227:   add       t0, t0, t0               --  8 µ
+228:   add       t0, t0, t0               --  8 µ
+229:   bcc       always, 236              --    µ
+       ───
+230:   add       t0, t0, t0               -- 16 µ
+231:   add       t0, t0, t0               -- 16 µ
+232:   bcc       always, 236              --    µ
+       ───
+233:   add       t0, t0, t0               -- 32 µ
+234:   add       t0, t0, t0               -- 32 µ
+235:   bcc       always, 236              --    µ
+       ───
+236:   ld        [t0], t0                 -- 32 
+237:   jmp       t0   
+       ───
+238:   nop          
+       ───
+239:   nop          
+       ───
+240:   nop          
+       ───
+241:   nop          
+       ───
+242:   nop          
+       ───
+243:   nop          
+       ───
+244:   nop          
+       ───
+245:   nop          
+       ───
+246:   nop          
+       ───
+247:   nop          
+       ───
+248:   nop          
+       ───
+249:   nop          
+       ───
+250:   nop          
+       ───
+251:   mov       psl, t0                  -- 16 µ
+252:   bic       t0, <pre>, t0            -- 16 µ
+253:   mov       t0, psl                  -- 16 µ
+       ───
+254:   mov       psl, t0                  -- 16 µ
+255:   bis       t0, <pre>, t0            -- 16 µ
+256:   mov       t0, psl                  -- 16 µ
+       ───
+257:   imm       0x0000_0124, t0   
+258:   exc       always, 36               --    µ
+       ───
+259:   sub       p1, p2, t0               -- 32 µ
+260:   bcc       <, 265                   --    µ
+261:   add       p1, p3, p1               -- 32 µ
+262:   sub       p1, p2, t0               -- 32 µ
+263:   bcc       >=, 265                  --    µ
+264:   mov       p3, <exe>                -- 32 µ
+       ───
+265:   nop          
+       ───
+266:   nop          
+       ───
+267:   nop          
+268:   stop         
+269:   commit       
+270:   rollback     
+       ───
+271:   mfpr      <pre>, <exe>   
+       ───
+272:   mtpr      <pre>, <pre>   
+       ───
+273:   imm       0x0000_0011, t0   
+274:   mfpr      t0, t0   
+275:   st        r0, [t0]                 -- 32 
+276:   ++        t0, t0                   -- 32 
+277:   st        r1, [t0]                 -- 32 
+278:   ++        t0, t0                   -- 32 
+279:   st        r2, [t0]                 -- 32 
+280:   ++        t0, t0                   -- 32 
+281:   st        r3, [t0]                 -- 32 
+282:   ++        t0, t0                   -- 32 
+283:   st        r4, [t0]                 -- 32 
+284:   ++        t0, t0                   -- 32 
+285:   st        r5, [t0]                 -- 32 
+286:   ++        t0, t0                   -- 32 
+287:   st        r6, [t0]                 -- 32 
+288:   ++        t0, t0                   -- 32 
+289:   st        r7, [t0]                 -- 32 
+290:   ++        t0, t0                   -- 32 
+291:   st        r8, [t0]                 -- 32 
+292:   ++        t0, t0                   -- 32 
+293:   st        r9, [t0]                 -- 32 
+294:   ++        t0, t0                   -- 32 
+295:   st        r10, [t0]                -- 32 
+296:   ++        t0, t0                   -- 32 
+297:   st        r11, [t0]                -- 32 
+298:   ++        t0, t0                   -- 32 
+299:   st        r12, [t0]                -- 32 
+300:   ++        t0, t0                   -- 32 
+301:   st        r13, [t0]                -- 32 
+302:   ++        t0, t0                   -- 32 
+303:   st        r14, [t0]                -- 32 
+304:   ++        t0, t0                   -- 32 
+305:   st        r15, [t0]                -- 32 
+306:   ++        t0, t0                   -- 32 
+       ───
+307:   imm       0x0000_0011, t0   
+308:   mfpr      t0, t0   
+309:   ld        [t0], r0                 -- 32 
+310:   ++        t0, t0                   -- 32 
+311:   ld        [t0], r1                 -- 32 
+312:   ++        t0, t0                   -- 32 
+313:   ld        [t0], r2                 -- 32 
+314:   ++        t0, t0                   -- 32 
+315:   ld        [t0], r3                 -- 32 
+316:   ++        t0, t0                   -- 32 
+317:   ld        [t0], r4                 -- 32 
+318:   ++        t0, t0                   -- 32 
+319:   ld        [t0], r5                 -- 32 
+320:   ++        t0, t0                   -- 32 
+321:   ld        [t0], r6                 -- 32 
+322:   ++        t0, t0                   -- 32 
+323:   ld        [t0], r7                 -- 32 
+324:   ++        t0, t0                   -- 32 
+325:   ld        [t0], r8                 -- 32 
+326:   ++        t0, t0                   -- 32 
+327:   ld        [t0], r9                 -- 32 
+328:   ++        t0, t0                   -- 32 
+329:   ld        [t0], r10                -- 32 
+330:   ++        t0, t0                   -- 32 
+331:   ld        [t0], r11                -- 32 
+332:   ++        t0, t0                   -- 32 
+333:   ld        [t0], r12                -- 32 
+334:   ++        t0, t0                   -- 32 
+335:   ld        [t0], r13                -- 32 
+336:   ++        t0, t0                   -- 32 
+337:   ld        [t0], r14                -- 32 
+338:   ++        t0, t0                   -- 32 
+339:   ld        [t0], r15                -- 32 
+340:   ++        t0, t0                   -- 32 
+       ───

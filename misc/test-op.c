@@ -64,8 +64,8 @@
 
 /***/
 
-#define C(x)	if (!(x)) { fprintf(stderr, "Error [%-4d]: %s\n", __LINE__, #x); exit(1); }
-#define T(x)	fprintf(stderr, "%s:\n", x);
+#define C(x)	if (!(x)) { printf("Error [%-4d]: %s\n", __LINE__, #x); exit(1); }
+#define T(x)	printf("%s:\n", x);
 
 void test_parse_int()
 {

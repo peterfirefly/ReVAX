@@ -102,6 +102,9 @@ cov
 # cachegrind analysis
 cachegrind.out.*
 
+# output from test-* progams during test
+misc/*.output
+
 # AFL tests
 afl/
 
