@@ -5,7 +5,8 @@
 ###
 
 CC=gcc
-CFLAGS=-O2 -W -Wall -std=c99
+EXTCFLAGS=
+CFLAGS=-O2 -W -Wall -std=c99 $(EXTCFLAGS)
 
 COV=-fprofile-arcs -ftest-coverage
 DBG=-g
