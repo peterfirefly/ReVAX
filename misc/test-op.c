@@ -771,7 +771,7 @@ void parse_branch_displacements()
 	};
 
 	for (unsigned i=0; i < ARRAY_SIZE(test_8a); i++) {
-		uint8_t		disp;
+		uint8_t		disp=0;	/* initialize to kill a warning */
 		bool		ok;
 
 		testcnt++;
@@ -834,7 +834,7 @@ DONE_8a:
 	};
 
 	for (unsigned i=0; i < ARRAY_SIZE(test_8b); i++) {
-		uint8_t		disp;
+		uint8_t		disp=0;	/* initialize to kill a warning */
 		bool		ok;
 
 		testcnt++;
@@ -907,7 +907,7 @@ DONE_8b:
 	};
 
 	for (unsigned i=0; i < ARRAY_SIZE(test_16a); i++) {
-		uint16_t	disp;
+		uint16_t	disp=0;	/* initialize to kill a warning */
 		bool		ok;
 
 		testcnt++;
@@ -973,7 +973,7 @@ DONE_16a:
 	};
 
 	for (unsigned i=0; i < ARRAY_SIZE(test_16b); i++) {
-		uint16_t		disp;
+		uint16_t		disp=0;	/* initialize to kill a warning */
 		bool			ok;
 
 		testcnt++;
