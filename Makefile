@@ -340,7 +340,7 @@ $(call DEP,test-fp,misc/test-fp.c)
 #test-op:	misc/test-op.c src/big-int.h src/shared.h	\
 #		src/op-support.h src/op-asm.h src/op-dis.h src/op-sim.h src/op-val.h
 $(call DEP,test-op,misc/test-op.c)
-	$(CC) $(CFLAGS) -g $(SAN-CC) $< -Isrc -lmpfr -lgmp -o $@
+	$(CC) $(CFLAGS) -g $(SAN-CC) $< -Isrc -lmpfr -lgmp -lrt -o $@
 
 #test-alu:	misc/test-alu.c src/shared.h
 $(call DEP,test-alu,misc/test-alu.c)
@@ -377,7 +377,7 @@ $(call DEP,test-fp-nosan,misc/test-fp.c)
 #test-op:	misc/test-op.c src/big-int.h src/shared.h	\
 #		src/op-support.h src/op-asm.h src/op-dis.h src/op-sim.h src/op-val.h
 $(call DEP,test-op-nosan,misc/test-op.c)
-	$(CC) $(CFLAGS) -DNDEBUG -g $< -Isrc -lmpfr -lgmp -o $@
+	$(CC) $(CFLAGS) -DNDEBUG -g $< -Isrc -lmpfr -lgmp -lrt -o $@
 
 #test-alu:	misc/test-alu.c src/shared.h
 $(call DEP,test-alu-nosan,misc/test-alu.c)
