@@ -71,6 +71,10 @@ afl-test-analyze
 *.o
 *.s
 
+# Windows stuff
+*.obj
+*.h.c
+
 # generated source code files
 src/vax-instr.h
 src/vax-instr.pl
