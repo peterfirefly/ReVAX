@@ -704,7 +704,6 @@ stats:	tables ops
 	    misc/regalloc.c misc/sizes-op.c misc/structs.c misc/struct-test.c	\
 	    misc/zeroext.c 							\
 	    misc/vax.asm							\
-	    misc/uasm-old.pl							\
 	  | misc/totals.pl
 	@echo ''
 	@echo ''
